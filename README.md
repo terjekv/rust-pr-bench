@@ -127,8 +127,9 @@ workflow booleans and numbers use their native YAML types.
 | `regression_override_label` | empty | Label required to approve PR-body exceptions |
 | `comment_mode` | `always` | `always`, `on-regression`, or `never` |
 
-The reusable workflow additionally exposes `action_repository` and `action_ref` for testing a fork
-or pull-request revision of the workflow implementation.
+The reusable workflow resolves its helper scripts from the exact called-workflow commit. It also
+exposes `action_repository` and `action_ref` overrides for testing a fork or pull-request revision
+of the workflow implementation.
 
 ## Outputs
 

@@ -29,6 +29,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Pin every external GitHub Action and CI container to an immutable commit or image digest.
 
+### Fixed
+
+- Resolve reusable-workflow helper checkouts from the called workflow's repository and commit,
+  rather than from the consuming repository's pull-request revision.
+
 ### Removed
 
 - Remove the deprecated `iai-callgrind`, `iai`, and `callgrind` public backend aliases.
