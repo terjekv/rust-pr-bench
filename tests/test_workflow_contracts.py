@@ -36,7 +36,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("  using: composite", metadata)
         self.assertIn("branding:", metadata)
         self.assertIn("scripts/action_entrypoint.py", metadata)
-        self.assertIn("actions/setup-python@v7", metadata)
+        self.assertIn(
+            "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7",
+            metadata,
+        )
         self.assertIn("has_regressions:", metadata)
         self.assertIn("has_unaccepted_regressions:", metadata)
         self.assertIn("had_errors:", metadata)
@@ -49,6 +52,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("helper.loadHistory", metadata)
         self.assertIn("helper.loadPullRequestMetadata", metadata)
         self.assertIn("helper.upsertReport", metadata)
+        self.assertIn(
+            "- name: Update pull request report\n      continue-on-error: true",
+            metadata,
+        )
         self.assertIn("inputs.comment_mode == 'always'", metadata)
         self.assertIn("steps.bench.outputs.should_fail == 'true'", metadata)
 
@@ -83,10 +90,16 @@ class WorkflowContractTests(unittest.TestCase):
         benchmark = extract_job_block(workflow, "benchmark")
 
         self.assertIn("scripts/precompile_benchmarks.py", precompile)
-        self.assertIn("actions/upload-artifact@v7", precompile)
+        self.assertIn(
+            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
+            precompile,
+        )
         self.assertIn("strategy:", benchmark)
         self.assertIn("needs.prepare-matrix.outputs.matrix", benchmark)
-        self.assertIn("actions/download-artifact@v8", benchmark)
+        self.assertIn(
+            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
+            benchmark,
+        )
         self.assertIn("scripts/run_pair.py", benchmark)
 
     def test_workflow_keeps_old_runner_binary_interoperability(self) -> None:
@@ -96,7 +109,10 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertIn("scripts/iai-callgrind-runner-dispatch", workflow)
         self.assertIn("scripts/gungraun-runner-dispatch", workflow)
-        self.assertIn("taiki-e/install-action@v2", workflow)
+        self.assertIn(
+            "taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780",
+            workflow,
+        )
 
     def test_workflow_pins_helpers_to_the_called_workflow_commit(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(
@@ -138,19 +154,69 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("uses: ./", action_job)
         self.assertIn("steps.bench.outputs.report_path", action_job)
         self.assertIn("uses: ./.github/workflows/rust-pr-bench.yml", workflow_job)
+        self.assertNotIn("action_repository:", workflow_job)
+        self.assertNotIn("action_ref:", workflow_job)
+
+        mixed = extract_job_block(sample, "workflow-mixed-runner-compatibility")
         self.assertIn(
             "action_repository: ${{ github.event.pull_request.head.repo.full_name }}",
-            workflow_job,
+            mixed,
         )
+        self.assertIn("action_ref: ${{ github.event.pull_request.head.sha }}", mixed)
 
-    def test_sample_workflow_lints_actions_and_checks_main_pushes(self) -> None:
-        sample = (REPO_ROOT / ".github/workflows/sample-self-test.yml").read_text(
+    def test_ci_lints_actions_and_checks_main_pushes(self) -> None:
+        ci = (REPO_ROOT / ".github/workflows/ci.yml").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn("  push:\n    branches:\n      - main", sample)
-        self.assertIn("docker://rhysd/actionlint:1.7.12", sample)
-        self.assertEqual(sample.count("if: github.event_name == 'pull_request'"), 3)
+        self.assertIn("  push:\n    branches:\n      - main", ci)
+        self.assertIn("  verify:\n    runs-on: ubuntu-latest", ci)
+        self.assertIn("docker://rhysd/actionlint@sha256:", ci)
+        self.assertIn('node-version: "24"', ci)
+
+    def test_pr_comment_updates_are_best_effort(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+
+        for step_name in (
+            "Upsert Gungraun PR comment",
+            "Upsert Criterion PR comment",
+            "Upsert consolidated PR comment (backend=all)",
+        ):
+            self.assertIn(
+                f"- name: {step_name}\n        continue-on-error: true", workflow
+            )
+
+    def test_external_actions_and_images_are_immutably_pinned(self) -> None:
+        paths = [REPO_ROOT / "action.yml"]
+        paths.extend(sorted((REPO_ROOT / ".github/workflows").glob("*.yml")))
+
+        for path in paths:
+            for line_number, line in enumerate(
+                path.read_text(encoding="utf-8").splitlines(), start=1
+            ):
+                stripped = line.strip()
+                if stripped.startswith("- uses: "):
+                    reference = stripped.removeprefix("- uses: ").split()[0]
+                elif stripped.startswith("uses: "):
+                    reference = stripped.removeprefix("uses: ").split()[0]
+                else:
+                    continue
+                if reference.startswith("./"):
+                    continue
+                if reference.startswith("docker://"):
+                    self.assertRegex(
+                        reference,
+                        r"^docker://[^@]+@sha256:[0-9a-f]{64}$",
+                        f"{path}:{line_number}",
+                    )
+                else:
+                    self.assertRegex(
+                        reference,
+                        r"^[^@]+@[0-9a-f]{40}$",
+                        f"{path}:{line_number}",
+                    )
 
     def test_sample_preserves_mixed_runner_comparison_coverage(self) -> None:
         sample = (REPO_ROOT / ".github/workflows/sample-self-test.yml").read_text(

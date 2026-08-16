@@ -23,6 +23,8 @@ Rust PR Bench provides two interfaces backed by the same comparison and reportin
 
 The action requires an Ubuntu runner and a full checkout so both revisions are available. The
 caller controls job permissions; `pull-requests: write` is needed only when PR comments are enabled.
+Comment updates are best-effort: fork pull requests normally receive a read-only token, so the
+report remains available in the job summary when GitHub does not permit the action to update the PR.
 
 ```yaml
 name: Rust PR Bench
