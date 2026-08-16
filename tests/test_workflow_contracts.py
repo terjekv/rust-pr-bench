@@ -60,12 +60,13 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("inputs.comment_mode == 'always'", metadata)
         self.assertIn("steps.bench.outputs.should_fail == 'true'", metadata)
 
-    def test_workflow_uses_new_repository_identity(self) -> None:
+    def test_workflow_uses_called_workflow_identity(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(
             encoding="utf-8"
         )
 
-        self.assertIn('default: "terjekv/rust-pr-bench"', workflow)
+        self.assertIn("job.workflow_repository", workflow)
+        self.assertIn("job.workflow_sha", workflow)
         self.assertNotIn("github-action-iai-callgrind", workflow)
         self.assertNotIn("regression_threshold_pct_iai_callgrind", workflow)
         self.assertFalse(
@@ -119,13 +120,28 @@ class WorkflowContractTests(unittest.TestCase):
         workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(
             encoding="utf-8"
         )
-        fallback = (
+        repository_fallback = (
+            "repository: ${{ inputs.action_repository != '' && "
+            "inputs.action_repository || job.workflow_repository }}"
+        )
+        ref_fallback = (
             "ref: ${{ inputs.action_ref != '' && inputs.action_ref || "
-            "github.workflow_sha }}"
+            "job.workflow_sha }}"
         )
 
-        self.assertEqual(workflow.count(fallback), 4)
+        self.assertEqual(workflow.count(repository_fallback), 4)
+        self.assertEqual(workflow.count(ref_fallback), 4)
+        self.assertIn('default: ""', workflow)
+        self.assertNotIn("github.workflow_sha", workflow)
         self.assertNotIn("ref: ${{ inputs.action_ref }}", workflow)
+
+        actionlint_config = (REPO_ROOT / ".github/actionlint.yaml").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn(
+            r'property "workflow_(repository|sha)" is not defined in object type',
+            actionlint_config,
+        )
 
     def test_workflow_wires_thresholds_and_regression_exceptions(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(

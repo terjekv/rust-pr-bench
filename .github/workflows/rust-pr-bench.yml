@@ -9,12 +9,12 @@ on:
         type: string
         default: "gungraun"
       action_repository:
-        description: Repository containing this workflow and scripts.
+        description: Override repository containing this workflow and scripts.
         required: false
         type: string
-        default: "terjekv/rust-pr-bench"
+        default: ""
       action_ref:
-        description: Ref (sha/tag/branch) for action_repository.
+        description: Override ref (sha/tag/branch) for the action repository.
         required: false
         type: string
         default: ""
@@ -136,16 +136,16 @@ jobs:
       normalized_backend: ${{ steps.backend.outputs.value }}
     steps:
       - name: Validate action source inputs
-        if: ${{ inputs.action_repository != 'terjekv/rust-pr-bench' && inputs.action_ref == '' }}
+        if: ${{ inputs.action_repository != '' && inputs.action_ref == '' }}
         run: |
-          echo "action_ref is required when action_repository is not the default." >&2
+          echo "action_ref is required when action_repository is overridden." >&2
           exit 1
 
       - name: Checkout benchmark action repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref != '' && inputs.action_ref || github.workflow_sha }}
+          repository: ${{ inputs.action_repository != '' && inputs.action_repository || job.workflow_repository }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Normalize backend name
@@ -215,8 +215,8 @@ jobs:
               '${{ inputs.criterion_statistic }}' \
               '${{ inputs.base_sha }}' \
               '${{ inputs.toolchain }}' \
-              '${{ inputs.action_repository }}' \
-              '${{ inputs.action_ref }}'
+              '${{ inputs.action_repository != '' && inputs.action_repository || job.workflow_repository }}' \
+              '${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}'
           )"
           HASH="$(printf '%s' "$INPUT_FINGERPRINT" | sha256sum | cut -c1-12)"
           echo "value=bench-result-${HASH}" >> "$GITHUB_OUTPUT"
@@ -238,8 +238,8 @@ jobs:
         if: matrix.enabled
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref != '' && inputs.action_ref || github.workflow_sha }}
+          repository: ${{ inputs.action_repository != '' && inputs.action_repository || job.workflow_repository }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Checkout caller repository
@@ -294,16 +294,16 @@ jobs:
 
     steps:
       - name: Validate action source inputs
-        if: ${{ inputs.action_repository != 'terjekv/rust-pr-bench' && inputs.action_ref == '' }}
+        if: ${{ inputs.action_repository != '' && inputs.action_ref == '' }}
         run: |
-          echo "action_ref is required when action_repository is not the default." >&2
+          echo "action_ref is required when action_repository is overridden." >&2
           exit 1
 
       - name: Checkout benchmark action repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref != '' && inputs.action_ref || github.workflow_sha }}
+          repository: ${{ inputs.action_repository != '' && inputs.action_repository || job.workflow_repository }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Checkout caller repository
@@ -463,16 +463,16 @@ jobs:
 
     steps:
       - name: Validate action source inputs
-        if: ${{ inputs.action_repository != 'terjekv/rust-pr-bench' && inputs.action_ref == '' }}
+        if: ${{ inputs.action_repository != '' && inputs.action_ref == '' }}
         run: |
-          echo "action_ref is required when action_repository is not the default." >&2
+          echo "action_ref is required when action_repository is overridden." >&2
           exit 1
 
       - name: Checkout benchmark action repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref != '' && inputs.action_ref || github.workflow_sha }}
+          repository: ${{ inputs.action_repository != '' && inputs.action_repository || job.workflow_repository }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
           path: action-src
 
       - name: Download benchmark artifacts

@@ -1,0 +1,5 @@
+paths:
+  .github/workflows/rust-pr-bench.yml:
+    ignore:
+      # GitHub added these called-workflow fields after actionlint 1.7.12.
+      - 'property "workflow_(repository|sha)" is not defined in object type'
