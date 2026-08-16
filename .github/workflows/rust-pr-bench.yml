@@ -145,7 +145,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || github.workflow_sha }}
           path: action-src
 
       - name: Normalize backend name
@@ -239,7 +239,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || github.workflow_sha }}
           path: action-src
 
       - name: Checkout caller repository
@@ -303,7 +303,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || github.workflow_sha }}
           path: action-src
 
       - name: Checkout caller repository
@@ -472,7 +472,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ inputs.action_repository }}
-          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || github.workflow_sha }}
           path: action-src
 
       - name: Download benchmark artifacts
