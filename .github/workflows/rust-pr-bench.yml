@@ -1,0 +1,813 @@
+name: Rust PR Bench
+
+on:
+  workflow_call:
+    inputs:
+      backend:
+        description: Benchmark backend to use (gungraun, criterion, or all).
+        required: false
+        type: string
+        default: "gungraun"
+      action_repository:
+        description: Repository containing this workflow and scripts.
+        required: false
+        type: string
+        default: "terjekv/rust-pr-bench"
+      action_ref:
+        description: Ref (sha/tag/branch) for action_repository.
+        required: false
+        type: string
+        default: ""
+      benchmarks_json:
+        description: >-
+          JSON array of benchmark specs. String entries are treated as cargo --bench targets.
+          Object entries support: name, bench, command, manifest_path, package, args.
+        required: false
+        type: string
+        default: "[]"
+      auto_discover:
+        description: Discover benches from benches/*.rs when benchmarks_json is empty.
+        required: false
+        type: boolean
+        default: true
+      auto_detect_moved_benchmarks:
+        description: Opt-in autodetection for benchmarks moved between workspace members.
+        required: false
+        type: boolean
+        default: false
+      feature_sets_json:
+        description: >-
+          JSON array of feature sets. String entries map to features. Object entries support:
+          name, features, no_default_features.
+        required: false
+        type: string
+        default: '[{"name":"default","features":""}]'
+      working_directory:
+        description: Working directory to run benchmark commands in.
+        required: false
+        type: string
+        default: "."
+      toolchain:
+        description: Rust toolchain to use.
+        required: false
+        type: string
+        default: stable
+      cargo_args:
+        description: Extra args appended to every benchmark command.
+        required: false
+        type: string
+        default: ""
+      criterion_cli_args:
+        description: Extra Criterion bench-binary args for default commands (appended after `--`).
+        required: false
+        type: string
+        default: "--noplot"
+      criterion_statistic:
+        description: Criterion statistic used for base-vs-head comparisons (mean or median).
+        required: false
+        type: string
+        default: "mean"
+      base_sha:
+        description: Optional override for PR base SHA.
+        required: false
+        type: string
+        default: ""
+      regression_threshold_pct:
+        description: Percent increase considered a regression.
+        required: false
+        type: number
+        default: 3
+      regression_threshold_pct_gungraun:
+        description: >-
+          Optional override threshold for the Gungraun backend.
+          Use -1 to fall back to the generic threshold.
+        required: false
+        type: number
+        default: -1
+      regression_threshold_pct_criterion:
+        description: >-
+          Optional override threshold for criterion backend. Use -1 to fall back to
+          regression_threshold_pct.
+        required: false
+        type: number
+        default: -1
+      fail_on_regression:
+        description: Fail workflow if any unaccepted case regresses above threshold.
+        required: false
+        type: boolean
+        default: false
+      regression_override_label:
+        description: >-
+          Exact PR label required to activate PR-body regression exceptions. Empty disables
+          regression exceptions.
+        required: false
+        type: string
+        default: ""
+      comment_mode:
+        description: PR comment behavior (always, on-regression, never).
+        required: false
+        type: string
+        default: always
+    outputs:
+      has_regressions:
+        description: Whether the latest run measured any regressions above threshold.
+        value: ${{ jobs.report.outputs.has_regressions }}
+      has_unaccepted_regressions:
+        description: Whether the latest run has regressions not covered by an approved exception.
+        value: ${{ jobs.report.outputs.has_unaccepted_regressions }}
+
+permissions:
+  contents: read
+  pull-requests: write
+
+env:
+  RUST_PR_BENCH_CANONICAL_BACKEND: gungraun
+
+jobs:
+  prepare-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      build_matrix: ${{ steps.matrix.outputs.build_matrix }}
+      artifact_prefix: ${{ steps.artifact_prefix.outputs.value }}
+      binary_artifact_prefix: ${{ steps.artifact_prefix.outputs.binary_value }}
+      base_sha: ${{ steps.refs.outputs.base_sha }}
+      head_sha: ${{ steps.refs.outputs.head_sha }}
+      normalized_backend: ${{ steps.backend.outputs.value }}
+    steps:
+      - name: Validate action source inputs
+        if: ${{ inputs.action_repository != 'terjekv/rust-pr-bench' && inputs.action_ref == '' }}
+        run: |
+          echo "action_ref is required when action_repository is not the default." >&2
+          exit 1
+
+      - name: Checkout benchmark action repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.action_repository }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
+          path: action-src
+
+      - name: Normalize backend name
+        id: backend
+        env:
+          BACKEND_INPUT: ${{ inputs.backend }}
+        run: |
+          BACKEND="$(python3 action-src/scripts/backend_names.py --selection "$BACKEND_INPUT")"
+          echo "value=$BACKEND" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: repo
+
+      - name: Resolve base SHA
+        id: refs
+        run: |
+          BASE_SHA='${{ inputs.base_sha }}'
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA='${{ github.event.pull_request.base.sha }}'
+          fi
+
+          HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          if [ -z "$HEAD_SHA" ]; then
+            HEAD_SHA='${{ github.sha }}'
+          fi
+
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Build matrix
+        id: matrix
+        run: |
+          python3 action-src/scripts/expand_matrix.py \
+            --repo-path repo \
+            --working-directory "${{ inputs.working_directory }}" \
+            --benchmarks-json '${{ inputs.benchmarks_json }}' \
+            --feature-sets-json '${{ inputs.feature_sets_json }}' \
+            --backend "${{ inputs.backend }}" \
+            --criterion-cli-args="${{ inputs.criterion_cli_args }}" \
+            ${{ inputs.auto_discover && '--auto-discover' || '' }} \
+            ${{ inputs.auto_detect_moved_benchmarks && '--auto-detect-moved-benchmarks' || '' }} \
+            --head-sha "${{ steps.refs.outputs.head_sha }}" \
+            --base-sha "${{ steps.refs.outputs.base_sha }}" \
+            --cargo-args "${{ inputs.cargo_args }}" \
+            --output matrix.json \
+            --build-output build-matrix.json
+
+          echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "build_matrix=$(cat build-matrix.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Build artifact prefix
+        id: artifact_prefix
+        run: |
+          INPUT_FINGERPRINT="$(
+            printf '%s\n' \
+              '${{ inputs.backend }}' \
+              '${{ inputs.working_directory }}' \
+              '${{ inputs.benchmarks_json }}' \
+              '${{ inputs.feature_sets_json }}' \
+              '${{ inputs.auto_discover }}' \
+              '${{ inputs.auto_detect_moved_benchmarks }}' \
+              '${{ inputs.cargo_args }}' \
+              '${{ inputs.criterion_cli_args }}' \
+              '${{ inputs.criterion_statistic }}' \
+              '${{ inputs.base_sha }}' \
+              '${{ inputs.toolchain }}' \
+              '${{ inputs.action_repository }}' \
+              '${{ inputs.action_ref }}'
+          )"
+          HASH="$(printf '%s' "$INPUT_FINGERPRINT" | sha256sum | cut -c1-12)"
+          echo "value=bench-result-${HASH}" >> "$GITHUB_OUTPUT"
+          echo "binary_value=bench-binary-${HASH}" >> "$GITHUB_OUTPUT"
+
+  precompile:
+    runs-on: ubuntu-latest
+    needs: prepare-matrix
+    env:
+      IAI_CALLGRIND_RUNNER: ${{ github.workspace }}/action-src/scripts/iai-callgrind-runner-dispatch
+      GUNGRAUN_RUNNER: ${{ github.workspace }}/action-src/scripts/gungraun-runner-dispatch
+      RUST_PR_BENCH_RUNNER_CACHE: ${{ github.workspace }}/.rust-pr-bench-runners
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.build_matrix) }}
+
+    steps:
+      - name: Checkout benchmark action repository
+        if: matrix.enabled
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.action_repository }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
+          path: action-src
+
+      - name: Checkout caller repository
+        if: matrix.enabled
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: repo
+
+      - name: Install Rust
+        if: matrix.enabled
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Precompile benchmark executables
+        if: matrix.enabled
+        env:
+          CASES_JSON: ${{ toJson(matrix.cases) }}
+          BENCHMARK_REF: ${{ matrix.side == 'head' && needs.prepare-matrix.outputs.head_sha || needs.prepare-matrix.outputs.base_sha }}
+        run: |
+          python3 action-src/scripts/precompile_benchmarks.py \
+            --repo-path repo \
+            --working-directory "${{ inputs.working_directory }}" \
+            --ref "$BENCHMARK_REF" \
+            --target-dir "repo/.bench-target/precompile/${{ matrix.group_id }}/${{ matrix.side }}" \
+            --cases-json "$CASES_JSON" \
+            --output precompiled
+
+      - name: Upload benchmark executables
+        if: matrix.enabled
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.group_id }}-${{ matrix.side }}
+          path: precompiled
+
+  benchmark:
+    runs-on: ubuntu-latest
+    if: >-
+      always() &&
+      needs.prepare-matrix.result == 'success'
+    needs:
+      - prepare-matrix
+      - precompile
+    env:
+      IAI_CALLGRIND_RUNNER: ${{ github.workspace }}/action-src/scripts/iai-callgrind-runner-dispatch
+      GUNGRAUN_RUNNER: ${{ github.workspace }}/action-src/scripts/gungraun-runner-dispatch
+      RUST_PR_BENCH_RUNNER_CACHE: ${{ github.workspace }}/.rust-pr-bench-runners
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare-matrix.outputs.matrix) }}
+
+    steps:
+      - name: Validate action source inputs
+        if: ${{ inputs.action_repository != 'terjekv/rust-pr-bench' && inputs.action_ref == '' }}
+        run: |
+          echo "action_ref is required when action_repository is not the default." >&2
+          exit 1
+
+      - name: Checkout benchmark action repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.action_repository }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
+          path: action-src
+
+      - name: Checkout caller repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          path: repo
+
+      - name: Resolve base SHA
+        id: refs
+        run: |
+          BASE_SHA='${{ inputs.base_sha }}'
+          if [ -z "$BASE_SHA" ]; then
+            BASE_SHA='${{ github.event.pull_request.base.sha }}'
+          fi
+
+          if [ -z "$BASE_SHA" ]; then
+            echo "Unable to resolve base SHA. Pass 'base_sha' input when not running on pull_request." >&2
+            exit 1
+          fi
+
+          HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          if [ -z "$HEAD_SHA" ]; then
+            HEAD_SHA='${{ github.sha }}'
+          fi
+
+          echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Install cargo-binstall for exact-version runner dispatch
+        if: ${{ matrix.backend == 'gungraun' }}
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-binstall
+
+      - name: Validate exact-version runner dispatchers
+        if: ${{ matrix.backend == 'gungraun' }}
+        run: |
+          test -x "$IAI_CALLGRIND_RUNNER"
+          test -x "$GUNGRAUN_RUNNER"
+
+      - name: Ensure valgrind is available
+        if: ${{ matrix.backend == 'gungraun' }}
+        run: |
+          if ! command -v valgrind >/dev/null 2>&1; then
+            sudo timeout 120 apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              update
+            sudo timeout 120 env DEBIAN_FRONTEND=noninteractive apt-get \
+              -o Acquire::Retries=3 \
+              -o Acquire::http::Timeout=30 \
+              -o Acquire::https::Timeout=30 \
+              install -y valgrind
+          fi
+
+      - name: Download precompiled head benchmark
+        if: matrix.precompile
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.build_group_id }}-head
+          path: precompiled/head
+
+      - name: Download precompiled base benchmark
+        if: matrix.precompile
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.build_group_id }}-base
+          path: precompiled/base
+
+      - name: Run benchmark pair
+        env:
+          ORIGINAL_HEAD_COMMAND: ${{ matrix.head_command }}
+          ORIGINAL_BASE_COMMAND: ${{ matrix.base_command }}
+          HEAD_RUN_ARGS: ${{ matrix.head_run_args }}
+          BASE_RUN_ARGS: ${{ matrix.base_run_args }}
+        run: |
+          mkdir -p artifacts
+          HEAD_COMMAND="$ORIGINAL_HEAD_COMMAND"
+          BASE_COMMAND="$ORIGINAL_BASE_COMMAND"
+          HEAD_BINARY="$GITHUB_WORKSPACE/precompiled/head/${{ matrix.id }}/benchmark"
+          BASE_BINARY="$GITHUB_WORKSPACE/precompiled/base/${{ matrix.id }}/benchmark"
+          HEAD_RUNTIME="$GITHUB_WORKSPACE/precompiled/head/_runtime"
+          BASE_RUNTIME="$GITHUB_WORKSPACE/precompiled/base/_runtime"
+          HEAD_PREBUILD_TARGET="$GITHUB_WORKSPACE/repo/.bench-target/precompile/${{ matrix.build_group_id }}/head"
+          BASE_PREBUILD_TARGET="$GITHUB_WORKSPACE/repo/.bench-target/precompile/${{ matrix.build_group_id }}/base"
+          RUST_HOST="$(rustc -vV | sed -n 's/^host: //p')"
+          RUST_SYSROOT="$(rustc --print sysroot)"
+          RUST_LIBRARY_PATH="$RUST_SYSROOT/lib/rustlib/$RUST_HOST/lib"
+          if [ -d "$HEAD_RUNTIME" ]; then
+            mkdir -p "$HEAD_PREBUILD_TARGET"
+            cp -R "$HEAD_RUNTIME"/. "$HEAD_PREBUILD_TARGET"/
+          fi
+          if [ -d "$BASE_RUNTIME" ]; then
+            mkdir -p "$BASE_PREBUILD_TARGET"
+            cp -R "$BASE_RUNTIME"/. "$BASE_PREBUILD_TARGET"/
+          fi
+          if [ -f "$HEAD_BINARY" ]; then
+            chmod +x "$HEAD_BINARY"
+            printf -v HEAD_BINARY_QUOTED '%q' "$HEAD_BINARY"
+            HEAD_LIBRARY_PATH="$HEAD_PREBUILD_TARGET/release/deps:$HEAD_PREBUILD_TARGET/release:$RUST_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            printf -v HEAD_LIBRARY_PATH_QUOTED '%q' "$HEAD_LIBRARY_PATH"
+            HEAD_COMMAND="env LD_LIBRARY_PATH=$HEAD_LIBRARY_PATH_QUOTED $HEAD_BINARY_QUOTED${HEAD_RUN_ARGS:+ $HEAD_RUN_ARGS}"
+          fi
+          if [ -f "$BASE_BINARY" ]; then
+            chmod +x "$BASE_BINARY"
+            printf -v BASE_BINARY_QUOTED '%q' "$BASE_BINARY"
+            BASE_LIBRARY_PATH="$BASE_PREBUILD_TARGET/release/deps:$BASE_PREBUILD_TARGET/release:$RUST_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+            printf -v BASE_LIBRARY_PATH_QUOTED '%q' "$BASE_LIBRARY_PATH"
+            BASE_COMMAND="env LD_LIBRARY_PATH=$BASE_LIBRARY_PATH_QUOTED $BASE_BINARY_QUOTED${BASE_RUN_ARGS:+ $BASE_RUN_ARGS}"
+          fi
+          python3 action-src/scripts/run_pair.py \
+            --repo-path repo \
+            --working-directory "${{ inputs.working_directory }}" \
+            --benchmark-name "${{ matrix.benchmark_name }}" \
+            --feature-name "${{ matrix.feature_name }}" \
+            --command "${{ matrix.command }}" \
+            --head-command "$HEAD_COMMAND" \
+            --base-command "$BASE_COMMAND" \
+            ${{ matrix.moved && '--moved' || '' }} \
+            --move-source "${{ matrix.move_source }}" \
+            --move-target "${{ matrix.move_target }}" \
+            ${{ matrix.move_ambiguous && '--move-ambiguous' || '' }} \
+            --move-candidates '${{ toJson(matrix.move_candidates) }}' \
+            --backend "${{ matrix.backend }}" \
+            --criterion-statistic "${{ inputs.criterion_statistic }}" \
+            --head-sha "${{ steps.refs.outputs.head_sha }}" \
+            --base-sha "${{ steps.refs.outputs.base_sha }}" \
+            --output artifacts/result.json
+
+      - name: Upload result
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-${{ matrix.id }}
+          path: |
+            artifacts/result.json
+            artifacts/*.error.log
+
+  report:
+    runs-on: ubuntu-latest
+    if: always() && needs.prepare-matrix.result == 'success'
+    needs:
+      - prepare-matrix
+      - benchmark
+    outputs:
+      has_regressions: ${{ steps.render_overall.outputs.has_regressions }}
+      has_unaccepted_regressions: ${{ steps.render_overall.outputs.has_unaccepted_regressions }}
+
+    steps:
+      - name: Validate action source inputs
+        if: ${{ inputs.action_repository != 'terjekv/rust-pr-bench' && inputs.action_ref == '' }}
+        run: |
+          echo "action_ref is required when action_repository is not the default." >&2
+          exit 1
+
+      - name: Checkout benchmark action repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ inputs.action_repository }}
+          ref: ${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}
+          path: action-src
+
+      - name: Download benchmark artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-*
+          path: artifacts
+
+      - name: Split artifacts by backend
+        run: |
+          python3 - <<'PY'
+          import json
+          import pathlib
+          import shutil
+
+          source = pathlib.Path("artifacts")
+          for backend in ("gungraun", "criterion"):
+              target = pathlib.Path(f"artifacts-{backend}")
+              if target.exists():
+                  shutil.rmtree(target)
+              target.mkdir(parents=True, exist_ok=True)
+
+          for path in source.rglob("result.json"):
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+              except Exception:
+                  continue
+              backend = payload.get("backend")
+              if backend not in {"gungraun", "criterion"}:
+                  continue
+              rel = path.relative_to(source)
+              dest = pathlib.Path(f"artifacts-{backend}") / rel
+              dest.parent.mkdir(parents=True, exist_ok=True)
+              shutil.copy2(path, dest)
+          PY
+
+      - name: Load Gungraun PR history
+        if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'criterion'
+        uses: actions/github-script@v9
+        env:
+          HISTORY_PATH: history-gungraun.json
+          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- gungraun-bench -->"]'
+          HISTORY_KEY: "gungraun-history"
+        with:
+          script: |
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.loadHistory({
+              github,
+              context,
+              core,
+              historyPath: process.env.HISTORY_PATH,
+              historyKey: process.env.HISTORY_KEY,
+              markers: JSON.parse(process.env.MARKERS_JSON),
+            });
+
+      - name: Load Criterion PR history
+        if: github.event_name == 'pull_request' && needs.prepare-matrix.outputs.normalized_backend != 'gungraun'
+        uses: actions/github-script@v9
+        env:
+          HISTORY_PATH: history-criterion.json
+          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- criterion-bench -->"]'
+          HISTORY_KEY: "criterion-history"
+        with:
+          script: |
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.loadHistory({
+              github,
+              context,
+              core,
+              historyPath: process.env.HISTORY_PATH,
+              historyKey: process.env.HISTORY_KEY,
+              markers: JSON.parse(process.env.MARKERS_JSON),
+            });
+
+      - name: Load current PR regression override metadata
+        if: github.event_name == 'pull_request' && inputs.regression_override_label != ''
+        uses: actions/github-script@v9
+        env:
+          METADATA_PATH: pr-regression-overrides.json
+          APPROVAL_LABEL: ${{ inputs.regression_override_label }}
+        with:
+          script: |
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.loadPullRequestMetadata({
+              github,
+              context,
+              metadataPath: process.env.METADATA_PATH,
+              approvalLabel: process.env.APPROVAL_LABEL,
+            });
+
+      - name: Prepare regression overrides
+        env:
+          REGRESSION_OVERRIDE_LABEL: ${{ inputs.regression_override_label }}
+        run: |
+          METADATA_ARG=()
+          if [ -f pr-regression-overrides.json ]; then
+            METADATA_ARG=(--pr-metadata pr-regression-overrides.json)
+          fi
+          python3 action-src/scripts/regression_overrides.py \
+            "${METADATA_ARG[@]}" \
+            --approval-label "$REGRESSION_OVERRIDE_LABEL" \
+            --output regression-overrides.json
+
+      - name: Resolve Gungraun regression threshold
+        id: threshold_gungraun
+        run: |
+          THRESHOLD="$(
+            python3 action-src/scripts/resolve_threshold.py \
+              --generic='${{ inputs.regression_threshold_pct }}' \
+              --gungraun='${{ inputs.regression_threshold_pct_gungraun }}'
+          )"
+          echo "value=$THRESHOLD" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve report metadata
+        id: report_meta
+        run: |
+          RUN_AT="$(date -u +"%Y-%m-%d %H:%M UTC")"
+          HEAD_SHA='${{ github.event.pull_request.head.sha }}'
+          if [ -z "$HEAD_SHA" ]; then
+            HEAD_SHA='${{ github.sha }}'
+          fi
+          PR_NUMBER='${{ github.event.pull_request.number }}'
+
+          {
+            echo "run_at=$RUN_AT"
+            echo "head_sha=$HEAD_SHA"
+            echo "pr_number=$PR_NUMBER"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Render Gungraun report
+        id: render_gungraun
+        if: needs.prepare-matrix.outputs.normalized_backend != 'criterion'
+        run: |
+          THRESHOLD='${{ steps.threshold_gungraun.outputs.value }}'
+          HISTORY_ARG=()
+          if [ -f history-gungraun.json ]; then
+            HISTORY_ARG=(--history-input history-gungraun.json)
+          fi
+          PR_ARG=()
+          if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
+            PR_ARG=(--pr-number "${{ steps.report_meta.outputs.pr_number }}")
+          fi
+          OMIT_RUN_META_ARG=()
+          if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" = "all" ]; then
+            OMIT_RUN_META_ARG=(--omit-run-meta)
+          fi
+
+          python3 action-src/scripts/render_report.py \
+            --artifacts-dir artifacts-gungraun \
+            --threshold "$THRESHOLD" \
+            --backend "gungraun" \
+            --markdown-output report-gungraun.md \
+            --summary-output summary-gungraun.json \
+            --history-key "gungraun-history" \
+            --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
+            --run-at "${{ steps.report_meta.outputs.run_at }}" \
+            --max-history 10 \
+            --regression-overrides-input regression-overrides.json \
+            "${HISTORY_ARG[@]}" \
+            "${PR_ARG[@]}" \
+            "${OMIT_RUN_META_ARG[@]}"
+
+          if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" != "all" ]; then
+            cat report-gungraun.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-gungraun.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+          echo "has_unaccepted_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-gungraun.json"))["has_unaccepted_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+
+      - name: Render Criterion report
+        id: render_criterion
+        if: needs.prepare-matrix.outputs.normalized_backend != 'gungraun'
+        run: |
+          THRESHOLD='${{ inputs.regression_threshold_pct }}'
+          if [ '${{ inputs.regression_threshold_pct_criterion }}' != '-1' ]; then
+            THRESHOLD='${{ inputs.regression_threshold_pct_criterion }}'
+          fi
+          HISTORY_ARG=()
+          if [ -f history-criterion.json ]; then
+            HISTORY_ARG=(--history-input history-criterion.json)
+          fi
+          PR_ARG=()
+          if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
+            PR_ARG=(--pr-number "${{ steps.report_meta.outputs.pr_number }}")
+          fi
+          OMIT_RUN_META_ARG=()
+          if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" = "all" ]; then
+            OMIT_RUN_META_ARG=(--omit-run-meta)
+          fi
+
+          python3 action-src/scripts/render_report.py \
+            --artifacts-dir artifacts-criterion \
+            --threshold "$THRESHOLD" \
+            --backend "criterion" \
+            --markdown-output report-criterion.md \
+            --summary-output summary-criterion.json \
+            --history-key "criterion-history" \
+            --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
+            --run-at "${{ steps.report_meta.outputs.run_at }}" \
+            --max-history 10 \
+            --regression-overrides-input regression-overrides.json \
+            "${HISTORY_ARG[@]}" \
+            "${PR_ARG[@]}" \
+            "${OMIT_RUN_META_ARG[@]}"
+
+          if [ "${{ needs.prepare-matrix.outputs.normalized_backend }}" != "all" ]; then
+            cat report-criterion.md >> "$GITHUB_STEP_SUMMARY"
+          fi
+          echo "has_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+          echo "has_unaccepted_regressions=$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_unaccepted_regressions"]).lower())')" >> "$GITHUB_OUTPUT"
+
+      - name: Compose combined report (backend=all)
+        if: needs.prepare-matrix.outputs.normalized_backend == 'all'
+        run: |
+          PR_ARG=()
+          if [ -n "${{ steps.report_meta.outputs.pr_number }}" ]; then
+            PR_ARG=(--pr-number "${{ steps.report_meta.outputs.pr_number }}")
+          fi
+
+          python3 action-src/scripts/compose_combined_report.py \
+            --output report.md \
+            --report-gungraun report-gungraun.md \
+            --report-criterion report-criterion.md \
+            --run-at "${{ steps.report_meta.outputs.run_at }}" \
+            --head-sha "${{ steps.report_meta.outputs.head_sha }}" \
+            "${PR_ARG[@]}"
+
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Compute overall regression flag
+        id: render_overall
+        run: |
+          HAS_REGRESSIONS=false
+          HAS_UNACCEPTED_REGRESSIONS=false
+          if [ -f summary-gungraun.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-gungraun.json"))["has_regressions"]).lower())')" = "true" ]; then
+            HAS_REGRESSIONS=true
+          fi
+          if [ -f summary-gungraun.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-gungraun.json"))["has_unaccepted_regressions"]).lower())')" = "true" ]; then
+            HAS_UNACCEPTED_REGRESSIONS=true
+          fi
+          if [ -f summary-criterion.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_regressions"]).lower())')" = "true" ]; then
+            HAS_REGRESSIONS=true
+          fi
+          if [ -f summary-criterion.json ] && [ "$(python3 -c 'import json; print(str(json.load(open("summary-criterion.json"))["has_unaccepted_regressions"]).lower())')" = "true" ]; then
+            HAS_UNACCEPTED_REGRESSIONS=true
+          fi
+          echo "has_regressions=$HAS_REGRESSIONS" >> "$GITHUB_OUTPUT"
+          echo "has_unaccepted_regressions=$HAS_UNACCEPTED_REGRESSIONS" >> "$GITHUB_OUTPUT"
+
+      - name: Build report artifact name
+        id: report_artifact_name
+        run: |
+          echo "value=bench-report-${{ needs.prepare-matrix.outputs.normalized_backend }}-${{ github.run_id }}-${{ github.run_attempt }}-$(date +%s%N)" >> "$GITHUB_OUTPUT"
+
+      - name: Upload report artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: ${{ steps.report_artifact_name.outputs.value }}
+          path: |
+            report*.md
+            summary-*.json
+            regression-overrides.json
+
+      - name: Upsert Gungraun PR comment
+        if: >-
+          github.event_name == 'pull_request' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'all' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'criterion' &&
+          (inputs.comment_mode == 'always' ||
+          (inputs.comment_mode == 'on-regression' && steps.render_gungraun.outputs.has_regressions == 'true'))
+        uses: actions/github-script@v9
+        env:
+          REPORT_PATH: report-gungraun.md
+          PRIMARY_MARKER: "<!-- gungraun-bench -->"
+          MARKERS_JSON: '["<!-- gungraun-bench -->"]'
+        with:
+          script: |
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.upsertReport({
+              github,
+              context,
+              reportPath: process.env.REPORT_PATH,
+              primaryMarker: process.env.PRIMARY_MARKER,
+              markers: JSON.parse(process.env.MARKERS_JSON),
+              deleteExtras: false,
+            });
+
+      - name: Upsert Criterion PR comment
+        if: >-
+          github.event_name == 'pull_request' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'all' &&
+          needs.prepare-matrix.outputs.normalized_backend != 'gungraun' &&
+          (inputs.comment_mode == 'always' ||
+          (inputs.comment_mode == 'on-regression' && steps.render_criterion.outputs.has_regressions == 'true'))
+        uses: actions/github-script@v9
+        env:
+          REPORT_PATH: report-criterion.md
+          PRIMARY_MARKER: "<!-- criterion-bench -->"
+          MARKERS_JSON: '["<!-- criterion-bench -->"]'
+        with:
+          script: |
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.upsertReport({
+              github,
+              context,
+              reportPath: process.env.REPORT_PATH,
+              primaryMarker: process.env.PRIMARY_MARKER,
+              markers: JSON.parse(process.env.MARKERS_JSON),
+              deleteExtras: false,
+            });
+
+      - name: Upsert consolidated PR comment (backend=all)
+        if: >-
+          github.event_name == 'pull_request' &&
+          needs.prepare-matrix.outputs.normalized_backend == 'all' &&
+          (inputs.comment_mode == 'always' ||
+          (inputs.comment_mode == 'on-regression' && steps.render_overall.outputs.has_regressions == 'true'))
+        uses: actions/github-script@v9
+        env:
+          REPORT_PATH: report.md
+          PRIMARY_MARKER: "<!-- rust-pr-bench -->"
+          MARKERS_JSON: '["<!-- rust-pr-bench -->","<!-- gungraun-bench -->","<!-- criterion-bench -->"]'
+        with:
+          script: |
+            const helper = require('./action-src/scripts/github_pr_comment');
+            await helper.upsertReport({
+              github,
+              context,
+              reportPath: process.env.REPORT_PATH,
+              primaryMarker: process.env.PRIMARY_MARKER,
+              markers: JSON.parse(process.env.MARKERS_JSON),
+              deleteExtras: true,
+            });
+
+      - name: Fail on regression
+        if: inputs.fail_on_regression && steps.render_overall.outputs.has_unaccepted_regressions == 'true'
+        run: |
+          echo "Detected unaccepted benchmark regressions above threshold."
+          exit 1

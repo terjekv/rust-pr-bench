@@ -1,0 +1,6 @@
+.iai-target/
+.bench-target/
+examples/sample-rust-app/target/
+__pycache__/
+*.pyc
+.ruff_cache/

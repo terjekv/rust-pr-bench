@@ -1,0 +1,256 @@
+name: Rust PR Bench
+description: Compare Rust benchmarks across revisions with Gungraun, Criterion, or both.
+author: Terje Kvernes
+
+branding:
+  icon: activity
+  color: purple
+
+inputs:
+  backend:
+    description: Benchmark backend to use (gungraun, criterion, or all).
+    required: false
+    default: gungraun
+  benchmarks_json:
+    description: JSON array of benchmark specifications. Empty enables auto-discovery by default.
+    required: false
+    default: "[]"
+  auto_discover:
+    description: Discover benches from benches/*.rs when benchmarks_json is empty.
+    required: false
+    default: "true"
+  auto_detect_moved_benchmarks:
+    description: Detect benchmarks moved between workspace members.
+    required: false
+    default: "false"
+  feature_sets_json:
+    description: JSON array of feature-set specifications.
+    required: false
+    default: '[{"name":"default","features":""}]'
+  working_directory:
+    description: Working directory containing the Cargo project or workspace.
+    required: false
+    default: .
+  toolchain:
+    description: Rust toolchain used to compile and run benchmarks.
+    required: false
+    default: stable
+  cargo_args:
+    description: Extra arguments appended to Cargo benchmark commands.
+    required: false
+    default: ""
+  criterion_cli_args:
+    description: Extra Criterion bench-binary arguments.
+    required: false
+    default: --noplot
+  criterion_statistic:
+    description: Criterion statistic used for comparison (mean or median).
+    required: false
+    default: mean
+  base_sha:
+    description: Base revision. Defaults to the pull request base SHA.
+    required: false
+    default: ""
+  head_sha:
+    description: Head revision. Defaults to the pull request head SHA or github.sha.
+    required: false
+    default: ""
+  regression_threshold_pct:
+    description: Percent increase considered a regression.
+    required: false
+    default: "3"
+  regression_threshold_pct_gungraun:
+    description: Optional Gungraun-specific threshold; -1 uses the generic threshold.
+    required: false
+    default: "-1"
+  regression_threshold_pct_criterion:
+    description: Optional Criterion-specific threshold; -1 uses the generic threshold.
+    required: false
+    default: "-1"
+  fail_on_regression:
+    description: Fail when an unaccepted regression exceeds its threshold.
+    required: false
+    default: "false"
+  regression_override_label:
+    description: PR label required to activate regression exceptions declared in the PR body.
+    required: false
+    default: ""
+  comment_mode:
+    description: PR comment behavior (always, on-regression, or never).
+    required: false
+    default: always
+
+outputs:
+  has_regressions:
+    description: Whether any measured regression exceeded its threshold.
+    value: ${{ steps.bench.outputs.has_regressions }}
+  has_unaccepted_regressions:
+    description: Whether any measured regression was not covered by an approved exception.
+    value: ${{ steps.bench.outputs.has_unaccepted_regressions }}
+  had_errors:
+    description: Whether one or more benchmark commands failed.
+    value: ${{ steps.bench.outputs.had_errors }}
+  report_path:
+    description: Absolute path to the generated Markdown report.
+    value: ${{ steps.bench.outputs.report_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Require a Linux runner
+      if: runner.os != 'Linux'
+      shell: bash
+      run: |
+        echo "Rust PR Bench currently requires a Linux runner." >&2
+        exit 1
+
+    - name: Allocate action workspace
+      id: paths
+      shell: bash
+      run: |
+        ACTION_WORK_DIR="$(mktemp -d "${RUNNER_TEMP}/rust-pr-bench.XXXXXX")"
+        echo "work_dir=$ACTION_WORK_DIR" >> "$GITHUB_OUTPUT"
+
+    - name: Load PR history and regression metadata
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v9
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        ACTION_WORK_DIR: ${{ steps.paths.outputs.work_dir }}
+        BACKEND_INPUT: ${{ inputs.backend }}
+        REGRESSION_OVERRIDE_LABEL: ${{ inputs.regression_override_label }}
+      with:
+        script: |
+          const path = require("path");
+          const helper = require(path.join(process.env.ACTION_PATH, "scripts/github_pr_comment"));
+          const backend = process.env.BACKEND_INPUT;
+          if (backend !== "criterion") {
+            await helper.loadHistory({
+              github,
+              context,
+              core,
+              historyPath: path.join(process.env.ACTION_WORK_DIR, "history-gungraun.json"),
+              historyKeys: ["gungraun-history", "iai-callgrind-history"],
+              markers: ["<!-- rust-pr-bench -->", "<!-- gungraun-bench -->", "<!-- iai-callgrind-bench -->"],
+              canonicalBackend: "gungraun",
+            });
+          }
+          if (backend !== "gungraun") {
+            await helper.loadHistory({
+              github,
+              context,
+              core,
+              historyPath: path.join(process.env.ACTION_WORK_DIR, "history-criterion.json"),
+              historyKey: "criterion-history",
+              markers: ["<!-- rust-pr-bench -->", "<!-- criterion-bench -->"],
+            });
+          }
+          if (process.env.REGRESSION_OVERRIDE_LABEL) {
+            await helper.loadPullRequestMetadata({
+              github,
+              context,
+              metadataPath: path.join(process.env.ACTION_WORK_DIR, "pr-regression-overrides.json"),
+              approvalLabel: process.env.REGRESSION_OVERRIDE_LABEL,
+            });
+          }
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.toolchain }}
+
+    - name: Install Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: "3.11"
+
+    - name: Install cargo-binstall
+      if: inputs.backend != 'criterion'
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cargo-binstall
+
+    - name: Ensure Valgrind is available
+      if: inputs.backend != 'criterion'
+      shell: bash
+      run: |
+        if ! command -v valgrind >/dev/null 2>&1; then
+          sudo timeout 120 apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            update
+          sudo timeout 120 env DEBIAN_FRONTEND=noninteractive apt-get \
+            -o Acquire::Retries=3 \
+            -o Acquire::http::Timeout=30 \
+            -o Acquire::https::Timeout=30 \
+            install -y valgrind
+        fi
+
+    - name: Run benchmarks and render report
+      id: bench
+      shell: bash
+      env:
+        RUST_PR_BENCH_CANONICAL_BACKEND: gungraun
+        IAI_CALLGRIND_RUNNER: ${{ github.action_path }}/scripts/iai-callgrind-runner-dispatch
+        GUNGRAUN_RUNNER: ${{ github.action_path }}/scripts/gungraun-runner-dispatch
+        RUST_PR_BENCH_RUNNER_CACHE: ${{ runner.temp }}/rust-pr-bench-runners
+        RUST_PR_BENCH_BACKEND: ${{ inputs.backend }}
+        RUST_PR_BENCH_BENCHMARKS_JSON: ${{ inputs.benchmarks_json }}
+        RUST_PR_BENCH_AUTO_DISCOVER: ${{ inputs.auto_discover }}
+        RUST_PR_BENCH_AUTO_DETECT_MOVED_BENCHMARKS: ${{ inputs.auto_detect_moved_benchmarks }}
+        RUST_PR_BENCH_FEATURE_SETS_JSON: ${{ inputs.feature_sets_json }}
+        RUST_PR_BENCH_WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        RUST_PR_BENCH_CARGO_ARGS: ${{ inputs.cargo_args }}
+        RUST_PR_BENCH_CRITERION_CLI_ARGS: ${{ inputs.criterion_cli_args }}
+        RUST_PR_BENCH_CRITERION_STATISTIC: ${{ inputs.criterion_statistic }}
+        RUST_PR_BENCH_BASE_SHA: ${{ inputs.base_sha }}
+        RUST_PR_BENCH_HEAD_SHA: ${{ inputs.head_sha }}
+        RUST_PR_BENCH_REGRESSION_THRESHOLD_PCT: ${{ inputs.regression_threshold_pct }}
+        RUST_PR_BENCH_REGRESSION_THRESHOLD_PCT_GUNGRAUN: ${{ inputs.regression_threshold_pct_gungraun }}
+        RUST_PR_BENCH_REGRESSION_THRESHOLD_PCT_CRITERION: ${{ inputs.regression_threshold_pct_criterion }}
+        RUST_PR_BENCH_FAIL_ON_REGRESSION: ${{ inputs.fail_on_regression }}
+        RUST_PR_BENCH_REGRESSION_OVERRIDE_LABEL: ${{ inputs.regression_override_label }}
+        RUST_PR_BENCH_COMMENT_MODE: ${{ inputs.comment_mode }}
+      run: |
+        python3 "$GITHUB_ACTION_PATH/scripts/action_entrypoint.py" \
+          --repository "$GITHUB_WORKSPACE" \
+          --work-dir "${{ steps.paths.outputs.work_dir }}"
+
+    - name: Add benchmark report to job summary
+      if: always() && steps.bench.outputs.report_path != ''
+      shell: bash
+      env:
+        REPORT_PATH: ${{ steps.bench.outputs.report_path }}
+      run: cat "$REPORT_PATH" >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Update pull request report
+      if: >-
+        always() &&
+        github.event_name == 'pull_request' &&
+        steps.bench.outputs.report_path != '' &&
+        inputs.comment_mode != 'never' &&
+        (inputs.comment_mode == 'always' || steps.bench.outputs.has_regressions == 'true')
+      uses: actions/github-script@v9
+      env:
+        ACTION_PATH: ${{ github.action_path }}
+        REPORT_PATH: ${{ steps.bench.outputs.report_path }}
+      with:
+        script: |
+          const path = require("path");
+          const helper = require(path.join(process.env.ACTION_PATH, "scripts/github_pr_comment"));
+          await helper.upsertReport({
+            github,
+            context,
+            reportPath: process.env.REPORT_PATH,
+            primaryMarker: "<!-- rust-pr-bench -->",
+            markers: ["<!-- rust-pr-bench -->", "<!-- gungraun-bench -->", "<!-- iai-callgrind-bench -->", "<!-- criterion-bench -->"],
+            deleteExtras: true,
+          });
+
+    - name: Enforce benchmark result
+      if: steps.bench.outputs.should_fail == 'true'
+      shell: bash
+      run: |
+        echo "Rust PR Bench detected benchmark errors or unaccepted regressions." >&2
+        exit 1
