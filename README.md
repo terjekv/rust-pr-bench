@@ -258,3 +258,7 @@ node --test tests/test_github_pr_comment.js
 
 The sample application in `examples/sample-rust-app` exercises Gungraun, Criterion, mixed runner
 versions, both public interfaces, and regression outputs in CI.
+
+## License
+
+Rust PR Bench is licensed under the [MIT License](LICENSE).

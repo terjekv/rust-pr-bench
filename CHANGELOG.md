@@ -9,6 +9,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- License the project under the MIT License.
 - Add a root composite action for sequential Gungraun and Criterion base-versus-head comparisons.
 - Add a parallel reusable workflow with precompiled benchmark artifacts and dynamic fan-out.
 - Add sticky PR reports, regression outputs, configurable gates, and label-approved exceptions.
