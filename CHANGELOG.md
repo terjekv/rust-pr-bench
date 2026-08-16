@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.0.0] - 2026-08-16
+
 ### Added
 
 - License the project under the MIT License.
@@ -37,3 +39,6 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 Rust PR Bench originated in
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 That repository retains the historical changelog and existing `v1`–`v3` compatibility releases.
+
+[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/terjekv/rust-pr-bench/releases/tag/v1.0.0
