@@ -1,0 +1,138 @@
+name: Sample Fixture Self-Test
+
+on:
+  pull_request:
+    paths:
+      - "action.yml"
+      - ".github/workflows/rust-pr-bench.yml"
+      - ".github/workflows/release.yml"
+      - ".github/workflows/sample-self-test.yml"
+      - "scripts/**"
+      - "tests/**"
+      - "examples/sample-rust-app/**"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  script-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+
+      - name: Run Python script tests
+        run: |
+          python3 -m py_compile scripts/*.py
+          python3 -m unittest discover -s tests -v
+
+      - name: Run JS helper tests
+        run: node --test tests/test_github_pr_comment.js
+
+  clippy-sample:
+    needs: script-tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run clippy on sample fixture
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: examples/sample-rust-app
+
+  action-sample-all:
+    needs: clippy-sample
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Run root action
+        id: bench
+        uses: ./
+        with:
+          backend: all
+          working_directory: examples/sample-rust-app
+          benchmarks_json: >-
+            [
+              {"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},
+              {"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}
+            ]
+          criterion_cli_args: "--noplot --sample-size 20 --measurement-time 1"
+          regression_threshold_pct_gungraun: "2"
+          regression_threshold_pct_criterion: "10"
+          comment_mode: never
+
+      - name: Validate action outputs
+        env:
+          HAS_REGRESSIONS: ${{ steps.bench.outputs.has_regressions }}
+          HAS_UNACCEPTED_REGRESSIONS: ${{ steps.bench.outputs.has_unaccepted_regressions }}
+          HAD_ERRORS: ${{ steps.bench.outputs.had_errors }}
+          REPORT_PATH: ${{ steps.bench.outputs.report_path }}
+        run: |
+          test "$HAD_ERRORS" = "false"
+          test -f "$REPORT_PATH"
+          case "$HAS_REGRESSIONS/$HAS_UNACCEPTED_REGRESSIONS" in
+            false/false|true/true|true/false) ;;
+            *)
+              echo "Unexpected regression outputs: $HAS_REGRESSIONS/$HAS_UNACCEPTED_REGRESSIONS" >&2
+              exit 1
+              ;;
+          esac
+
+  workflow-sample-all:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
+      backend: all
+      working_directory: examples/sample-rust-app
+      benchmarks_json: >-
+        [
+          {"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},
+          {"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}
+        ]
+      feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
+      criterion_cli_args: "--noplot --sample-size 20 --measurement-time 1"
+      criterion_statistic: median
+      regression_threshold_pct_gungraun: 2
+      regression_threshold_pct_criterion: 10
+      fail_on_regression: false
+      comment_mode: always
+
+  workflow-mixed-runner-compatibility:
+    needs: clippy-sample
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      action_repository: ${{ github.event.pull_request.head.repo.full_name }}
+      action_ref: ${{ github.event.pull_request.head.sha }}
+      backend: gungraun
+      working_directory: examples/sample-rust-app
+      benchmarks_json: >-
+        [
+          {
+            "name":"sample_gungraun_migration",
+            "bench":"sample_callgrind_bench",
+            "backend":"gungraun",
+            "base":{"bench":"sample_iai_callgrind_compat_bench"}
+          }
+        ]
+      regression_threshold_pct_gungraun: 100
+      comment_mode: never

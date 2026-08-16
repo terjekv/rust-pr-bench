@@ -1,0 +1,27 @@
+[package]
+name = "sample-rust-app"
+version = "0.1.0"
+edition = "2021"
+
+[features]
+default = []
+alt-impl = []
+
+[dependencies]
+
+[dev-dependencies]
+iai-callgrind = "0.16.1"
+gungraun = "0.19.4"
+criterion = "0.8.2"
+
+[[bench]]
+name = "sample_callgrind_bench"
+harness = false
+
+[[bench]]
+name = "sample_iai_callgrind_compat_bench"
+harness = false
+
+[[bench]]
+name = "sample_criterion_bench"
+harness = false
