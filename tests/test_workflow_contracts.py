@@ -1,3 +1,4 @@
+import re
 import unittest
 
 from testlib import REPO_ROOT
@@ -173,6 +174,26 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("  verify:\n    runs-on: ubuntu-latest", ci)
         self.assertIn("docker://rhysd/actionlint@sha256:", ci)
         self.assertIn('node-version: "24"', ci)
+
+    def test_release_workflow_extracts_only_the_version_section(self) -> None:
+        release = (REPO_ROOT / ".github/workflows/release.yml").read_text(
+            encoding="utf-8"
+        )
+        changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+        version = "1.0.0"
+        pattern = re.compile(
+            rf"^## \[{re.escape(version)}\] - [^\n]*\n(?P<body>.*?)(?=^## |\Z)",
+            re.MULTILINE | re.DOTALL,
+        )
+        match = pattern.search(changelog)
+
+        self.assertIn('- "v*.*.*"', release)
+        self.assertIn("draft: true", release)
+        self.assertIn(r"(?=^## |\Z)", release)
+        self.assertIsNotNone(match)
+        body = match.group("body").strip() if match else ""
+        self.assertIn("Add a root composite action", body)
+        self.assertNotIn("Project history", body)
 
     def test_pr_comment_updates_are_best_effort(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(

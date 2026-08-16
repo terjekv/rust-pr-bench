@@ -28,7 +28,7 @@ jobs:
           changelog = pathlib.Path("CHANGELOG.md").read_text(encoding="utf-8")
           version = os.environ["TAG_NAME"].removeprefix("v")
           pattern = re.compile(
-              rf"^## \[{re.escape(version)}\] - [^\n]*\n(?P<body>.*?)(?=^## \[|\Z)",
+              rf"^## \[{re.escape(version)}\] - [^\n]*\n(?P<body>.*?)(?=^## |\Z)",
               re.MULTILINE | re.DOTALL,
           )
           match = pattern.search(changelog)
