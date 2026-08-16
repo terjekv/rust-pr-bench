@@ -104,7 +104,7 @@ class WorkflowContractTests(unittest.TestCase):
         )
         fallback = (
             "ref: ${{ inputs.action_ref != '' && inputs.action_ref || "
-            "job.workflow_sha }}"
+            "github.workflow_sha }}"
         )
 
         self.assertEqual(workflow.count(fallback), 4)
@@ -142,6 +142,15 @@ class WorkflowContractTests(unittest.TestCase):
             "action_repository: ${{ github.event.pull_request.head.repo.full_name }}",
             workflow_job,
         )
+
+    def test_sample_workflow_lints_actions_and_checks_main_pushes(self) -> None:
+        sample = (REPO_ROOT / ".github/workflows/sample-self-test.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("  push:\n    branches:\n      - main", sample)
+        self.assertIn("docker://rhysd/actionlint:1.7.12", sample)
+        self.assertEqual(sample.count("if: github.event_name == 'pull_request'"), 3)
 
     def test_sample_preserves_mixed_runner_comparison_coverage(self) -> None:
         sample = (REPO_ROOT / ".github/workflows/sample-self-test.yml").read_text(

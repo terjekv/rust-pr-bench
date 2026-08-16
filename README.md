@@ -252,8 +252,11 @@ The original compatibility workflow path does not exist in this repository. Use
 Run the local tests with:
 
 ```bash
+actionlint
 python3 -m unittest discover -s tests -v
 node --test tests/test_github_pr_comment.js
+cargo clippy --manifest-path examples/sample-rust-app/Cargo.toml \
+  --all-targets --all-features -- -D warnings
 ```
 
 The sample application in `examples/sample-rust-app` exercises Gungraun, Criterion, mixed runner
