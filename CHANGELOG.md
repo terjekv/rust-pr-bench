@@ -10,6 +10,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 ### Added
 
 - License the project under the MIT License.
+- Add a stable CI verification gate and a private vulnerability reporting policy.
 - Add a root composite action for sequential Gungraun and Criterion base-versus-head comparisons.
 - Add a parallel reusable workflow with precompiled benchmark artifacts and dynamic fan-out.
 - Add sticky PR reports, regression outputs, configurable gates, and label-approved exceptions.
@@ -20,6 +21,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 - Establish `terjekv/rust-pr-bench` as the new canonical project identity.
 - Start a clean `v1` public API using only `gungraun`, `criterion`, and `all` backend values.
+- Make pull-request comment updates best-effort when fork token permissions are read-only.
+
+### Security
+
+- Pin every external GitHub Action and CI container to an immutable commit or image digest.
 
 ### Removed
 

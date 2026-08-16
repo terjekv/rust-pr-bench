@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2
+
+      - name: Lint GitHub Actions workflows
+        uses: docker://rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 # 1.7.12
+        with:
+          args: -color
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with:
+          node-version: "24"
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c # stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Run Python script tests
+        run: |
+          python3 -m py_compile scripts/*.py
+          python3 -m unittest discover -s tests -v
+
+      - name: Run JS helper tests
+        run: node --test tests/test_github_pr_comment.js
+
+      - name: Check sample fixture formatting
+        run: cargo fmt --all -- --check
+        working-directory: examples/sample-rust-app
+
+      - name: Run clippy on sample fixture
+        run: cargo clippy --all-targets --all-features -- -D warnings
+        working-directory: examples/sample-rust-app
+
+      - name: Check runner dispatch wrappers
+        run: shellcheck scripts/gungraun-runner-dispatch scripts/iai-callgrind-runner-dispatch
+
+      - name: Check whitespace
+        run: git diff --check HEAD^
