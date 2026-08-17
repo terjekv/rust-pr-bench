@@ -588,9 +588,17 @@ def render_markdown(
         for entry in sorted(error_entries, key=lambda e: e["benchmark_name"]):
             reasons = []
             if entry.get("head_error"):
-                reasons.append(f"head exit {entry.get('head_error_code')}")
+                head_stage = entry.get("head_error_stage")
+                stage_text = f" {head_stage}" if head_stage else ""
+                reasons.append(
+                    f"head{stage_text} exit {entry.get('head_error_code')}"
+                )
             if entry.get("base_error"):
-                reasons.append(f"base exit {entry.get('base_error_code')}")
+                base_stage = entry.get("base_error_stage")
+                stage_text = f" {base_stage}" if base_stage else ""
+                reasons.append(
+                    f"base{stage_text} exit {entry.get('base_error_code')}"
+                )
             error_lines.append(
                 "- `{feature}` / `{bench}`: {reason}".format(
                     feature=entry["feature_name"],

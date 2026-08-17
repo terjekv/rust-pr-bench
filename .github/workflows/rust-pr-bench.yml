@@ -57,6 +57,26 @@ on:
         required: false
         type: string
         default: ""
+      setup_command:
+        description: Runtime setup command run separately for each head and base execution.
+        required: false
+        type: string
+        default: ""
+      readiness_command:
+        description: Command retried after setup until the service is ready.
+        required: false
+        type: string
+        default: ""
+      teardown_command:
+        description: Cleanup command always run after each head and base execution.
+        required: false
+        type: string
+        default: ""
+      readiness_timeout_seconds:
+        description: Maximum seconds to retry readiness_command for each execution.
+        required: false
+        type: number
+        default: 60
       criterion_cli_args:
         description: Extra Criterion bench-binary args for default commands (appended after `--`).
         required: false
@@ -201,6 +221,10 @@ jobs:
 
       - name: Build artifact prefix
         id: artifact_prefix
+        env:
+          SETUP_COMMAND: ${{ inputs.setup_command }}
+          READINESS_COMMAND: ${{ inputs.readiness_command }}
+          TEARDOWN_COMMAND: ${{ inputs.teardown_command }}
         run: |
           INPUT_FINGERPRINT="$(
             printf '%s\n' \
@@ -211,6 +235,10 @@ jobs:
               '${{ inputs.auto_discover }}' \
               '${{ inputs.auto_detect_moved_benchmarks }}' \
               '${{ inputs.cargo_args }}' \
+              "$SETUP_COMMAND" \
+              "$READINESS_COMMAND" \
+              "$TEARDOWN_COMMAND" \
+              '${{ inputs.readiness_timeout_seconds }}' \
               '${{ inputs.criterion_cli_args }}' \
               '${{ inputs.criterion_statistic }}' \
               '${{ inputs.base_sha }}' \
@@ -388,6 +416,10 @@ jobs:
           ORIGINAL_BASE_COMMAND: ${{ matrix.base_command }}
           HEAD_RUN_ARGS: ${{ matrix.head_run_args }}
           BASE_RUN_ARGS: ${{ matrix.base_run_args }}
+          SETUP_COMMAND: ${{ inputs.setup_command }}
+          READINESS_COMMAND: ${{ inputs.readiness_command }}
+          TEARDOWN_COMMAND: ${{ inputs.teardown_command }}
+          READINESS_TIMEOUT_SECONDS: ${{ inputs.readiness_timeout_seconds }}
         run: |
           mkdir -p artifacts
           HEAD_COMMAND="$ORIGINAL_HEAD_COMMAND"
@@ -438,6 +470,10 @@ jobs:
             --move-candidates '${{ toJson(matrix.move_candidates) }}' \
             --backend "${{ matrix.backend }}" \
             --criterion-statistic "${{ inputs.criterion_statistic }}" \
+            --setup-command "$SETUP_COMMAND" \
+            --readiness-command "$READINESS_COMMAND" \
+            --teardown-command "$TEARDOWN_COMMAND" \
+            --readiness-timeout-seconds "$READINESS_TIMEOUT_SECONDS" \
             --head-sha "${{ steps.refs.outputs.head_sha }}" \
             --base-sha "${{ steps.refs.outputs.base_sha }}" \
             --output artifacts/result.json
@@ -449,7 +485,7 @@ jobs:
           name: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-${{ matrix.id }}
           path: |
             artifacts/result.json
-            artifacts/*.error.log
+            artifacts/*.log
 
   report:
     runs-on: ubuntu-latest

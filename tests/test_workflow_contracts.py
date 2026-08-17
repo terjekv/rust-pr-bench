@@ -104,6 +104,31 @@ class WorkflowContractTests(unittest.TestCase):
         )
         self.assertIn("scripts/run_pair.py", benchmark)
 
+    def test_public_interfaces_wire_isolated_runtime_lifecycle_hooks(self) -> None:
+        metadata = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
+        workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(
+            encoding="utf-8"
+        )
+        benchmark = extract_job_block(workflow, "benchmark")
+
+        for input_name in (
+            "setup_command",
+            "readiness_command",
+            "teardown_command",
+            "readiness_timeout_seconds",
+        ):
+            self.assertIn(f"  {input_name}:", metadata)
+            self.assertIn(f"      {input_name}:", workflow)
+
+        self.assertIn("RUST_PR_BENCH_SETUP_COMMAND", metadata)
+        self.assertIn("RUST_PR_BENCH_READINESS_COMMAND", metadata)
+        self.assertIn("RUST_PR_BENCH_TEARDOWN_COMMAND", metadata)
+        self.assertIn('--setup-command "$SETUP_COMMAND"', benchmark)
+        self.assertIn('--readiness-command "$READINESS_COMMAND"', benchmark)
+        self.assertIn('--teardown-command "$TEARDOWN_COMMAND"', benchmark)
+        self.assertIn('--readiness-timeout-seconds "$READINESS_TIMEOUT_SECONDS"', benchmark)
+        self.assertIn("artifacts/*.log", benchmark)
+
     def test_workflow_keeps_old_runner_binary_interoperability(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(
             encoding="utf-8"
@@ -170,9 +195,29 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("fetch-depth: 0", action_job)
         self.assertIn("uses: ./", action_job)
         self.assertIn("steps.bench.outputs.report_path", action_job)
+        self.assertIn("setup_command:", action_job)
+        self.assertIn("readiness_command:", action_job)
+        self.assertIn("teardown_command:", action_job)
         self.assertIn("uses: ./.github/workflows/rust-pr-bench.yml", workflow_job)
+        self.assertIn("setup_command:", workflow_job)
+        self.assertIn("readiness_command:", workflow_job)
+        self.assertIn("teardown_command:", workflow_job)
         self.assertNotIn("action_repository:", workflow_job)
         self.assertNotIn("action_ref:", workflow_job)
+
+        action_postgres = extract_job_block(sample, "action-postgres-lifecycle")
+        workflow_postgres = extract_job_block(sample, "workflow-postgres-lifecycle")
+        for postgres_job in (action_postgres, workflow_postgres):
+            self.assertRegex(
+                postgres_job,
+                r"postgres:16\.14-alpine3\.24@sha256:[0-9a-f]{64}",
+            )
+            self.assertIn("/proc/1/comm", postgres_job)
+            self.assertIn("pg_isready", postgres_job)
+            self.assertIn("postgres_select_smoke.py", postgres_job)
+            self.assertIn("setup_command:", postgres_job)
+            self.assertIn("readiness_command:", postgres_job)
+            self.assertIn("teardown_command:", postgres_job)
 
         mixed = extract_job_block(sample, "workflow-mixed-runner-compatibility")
         self.assertIn(
