@@ -112,7 +112,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("scripts/iai-callgrind-runner-dispatch", workflow)
         self.assertIn("scripts/gungraun-runner-dispatch", workflow)
         self.assertIn(
-            "taiki-e/install-action@288e746965032cfcc232e09af2daf5f23c14d780",
+            "taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833",
             workflow,
         )
 
