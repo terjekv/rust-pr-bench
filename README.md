@@ -101,6 +101,8 @@ jobs:
 - Supports Gungraun instruction/event counts, Criterion wall-clock measurements, or both.
 - Discovers standalone and workspace benchmark targets or accepts explicit commands.
 - Tests multiple Cargo feature sets and honors benchmark target `required-features`.
+- Forms target-level deltas only from metric identities present in both revisions; added or removed
+  benchmark functions remain visible as unknown metrics without skewing the aggregate.
 - Supports benchmarks moved between workspace members.
 - Selects the exact Gungraun runner required by each benchmark executable.
 - Can execute an `iai-callgrind 0.16.1` benchmark from an older base revision during migration.

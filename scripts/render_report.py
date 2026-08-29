@@ -101,11 +101,11 @@ def avg(values: Iterable[float]) -> float | None:
 def collect_metric_deltas(entry: dict[str, Any]) -> list[float]:
     base_metrics = {item["metric"]: float(item["value"]) for item in entry.get("base_metrics", [])}
     head_metrics = {item["metric"]: float(item["value"]) for item in entry.get("head_metrics", [])}
-    metric_names = set(base_metrics.keys()) | set(head_metrics.keys())
+    metric_names = base_metrics.keys() & head_metrics.keys()
     deltas: list[float] = []
     for metric_name in metric_names:
-        base_value = base_metrics.get(metric_name, 0)
-        head_value = head_metrics.get(metric_name, 0)
+        base_value = base_metrics[metric_name]
+        head_value = head_metrics[metric_name]
         deltas.append(metric_delta(base_value, head_value))
     return deltas
 
@@ -256,7 +256,10 @@ def render_metric_breakdown(entry: dict[str, Any], threshold: float) -> list[str
     for metric_name in metric_names:
         base_value = base_metrics.get(metric_name, 0)
         head_value = head_metrics.get(metric_name, 0)
-        delta_pct = metric_delta(base_value, head_value)
+        if metric_name in base_metrics and metric_name in head_metrics:
+            delta_pct = metric_delta(base_value, head_value)
+        else:
+            delta_pct = float("nan")
         status, _ = classify(delta_pct, threshold)
         lines.append(
             "| {metric} | {base} | {head} | {delta} | {status} |".format(

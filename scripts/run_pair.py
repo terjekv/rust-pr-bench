@@ -203,6 +203,20 @@ def collect_criterion_metrics(
     }
 
 
+def paired_metric_totals(
+    base_metrics: list[dict[str, Any]], head_metrics: list[dict[str, Any]]
+) -> tuple[float, float, int]:
+    """Return totals formed only from metric identities present on both sides."""
+    base_values = {item["metric"]: float(item["value"]) for item in base_metrics}
+    head_values = {item["metric"]: float(item["value"]) for item in head_metrics}
+    shared_names = base_values.keys() & head_values.keys()
+    return (
+        sum(base_values[name] for name in shared_names),
+        sum(head_values[name] for name in shared_names),
+        len(shared_names),
+    )
+
+
 def detect_missing_bench(command: str, cwd: pathlib.Path) -> str | None:
     try:
         parts = shlex.split(command)
@@ -366,14 +380,23 @@ def main() -> int:
 
     git_checkout(repo_path, args.head_sha)
 
-    base_total = base.get("total", 0)
-    head_total = head.get("total", 0)
+    base_observed_total = base.get("total", 0)
+    head_observed_total = head.get("total", 0)
+    comparable_metric_count = 0
     if base.get("missing") or head.get("missing") or base.get("error") or head.get("error"):
+        base_total = base_observed_total
+        head_total = head_observed_total
         delta = 0
         delta_pct = float("nan")
     else:
+        base_total, head_total, comparable_metric_count = paired_metric_totals(
+            base["metrics"], head["metrics"]
+        )
         delta = head_total - base_total
-        delta_pct = ((delta / base_total) * 100.0) if base_total else 0.0
+        if comparable_metric_count == 0:
+            delta_pct = float("nan")
+        else:
+            delta_pct = ((delta / base_total) * 100.0) if base_total else 0.0
 
     result = {
         "backend": backend,
@@ -389,6 +412,9 @@ def main() -> int:
         "move_candidates": json.loads(args.move_candidates),
         "base_total": base_total,
         "head_total": head_total,
+        "base_observed_total": base_observed_total,
+        "head_observed_total": head_observed_total,
+        "comparable_metric_count": comparable_metric_count,
         "delta": delta,
         "delta_pct": delta_pct,
         "head_metrics": head["metrics"],

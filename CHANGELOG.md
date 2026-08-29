@@ -7,6 +7,14 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.1] - 2026-08-30
+
+### Fixed
+
+- Compare target-level totals using only metric identities present in both revisions, so adding or
+  removing an independent Criterion function is reported as an unknown metric instead of a false
+  aggregate performance regression.
+
 ## [1.1.0] - 2026-08-29
 
 ### Added
@@ -63,6 +71,7 @@ Rust PR Bench originated in
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 That repository retains the historical changelog and existing `v1`–`v3` compatibility releases.
 
-[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.1...HEAD
+[1.1.1]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/terjekv/rust-pr-bench/releases/tag/v1.0.0

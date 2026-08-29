@@ -54,6 +54,30 @@ class RunPairTests(unittest.TestCase):
             "gungraun",
         )
 
+    def test_paired_totals_exclude_metrics_missing_from_either_revision(self) -> None:
+        base_metrics = [
+            {"metric": "existing", "value": 100},
+            {"metric": "removed", "value": 250},
+        ]
+        head_metrics = [
+            {"metric": "existing", "value": 110},
+            {"metric": "added", "value": 500},
+        ]
+
+        self.assertEqual(
+            run_pair.paired_metric_totals(base_metrics, head_metrics),
+            (100.0, 110.0, 1),
+        )
+
+    def test_paired_totals_are_empty_when_no_metric_identity_is_shared(self) -> None:
+        self.assertEqual(
+            run_pair.paired_metric_totals(
+                [{"metric": "old", "value": 100}],
+                [{"metric": "new", "value": 100}],
+            ),
+            (0, 0, 0),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
