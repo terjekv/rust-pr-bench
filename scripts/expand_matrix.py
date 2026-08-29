@@ -87,6 +87,25 @@ def package_name(crate_dir: pathlib.Path) -> str | None:
     return None
 
 
+def benchmark_required_features(crate_dir: pathlib.Path) -> dict[str, list[str]]:
+    manifest = read_manifest(crate_dir / "Cargo.toml")
+    targets = manifest.get("bench", [])
+    if not isinstance(targets, list):
+        return {}
+
+    required_by_target: dict[str, list[str]] = {}
+    for target in targets:
+        if not isinstance(target, dict) or not isinstance(target.get("name"), str):
+            continue
+        required = target.get("required-features", [])
+        if not isinstance(required, list) or not all(
+            isinstance(item, str) for item in required
+        ):
+            continue
+        required_by_target[str(target["name"])] = list(required)
+    return required_by_target
+
+
 def relative_path(path: pathlib.Path, start: pathlib.Path) -> str:
     rel = path.relative_to(start)
     return "." if rel.as_posix() == "." else rel.as_posix()
@@ -103,6 +122,7 @@ def discover_crate_benchmarks(
         return []
 
     selected_backends = set(expand_backends(backend_selection))
+    required_by_target = benchmark_required_features(crate_dir)
     benchmarks: list[dict[str, Any]] = []
     for path in sorted(benches_dir.glob("*.rs")):
         if path.name == "mod.rs":
@@ -130,6 +150,9 @@ def discover_crate_benchmarks(
             name = package_name(crate_dir)
             if name:
                 spec["package_name"] = name
+            required_features = required_by_target.get(path.stem, [])
+            if required_features:
+                spec["required_features"] = required_features
             benchmarks.append(spec)
     return benchmarks
 
@@ -246,6 +269,22 @@ def build_command(
     criterion_cli_args: str,
 ) -> str:
     features = feature_set["features"].strip()
+    required_features = spec.get("required_features", [])
+    if isinstance(required_features, str):
+        required_features = [required_features]
+    if not isinstance(required_features, list) or not all(
+        isinstance(item, str) for item in required_features
+    ):
+        raise ValueError("required_features must be a string or an array of strings")
+    configured_features = {
+        item for item in re.split(r"[\s,]+", features) if item
+    }
+    additions = [
+        item for item in required_features if item and item not in configured_features
+    ]
+    if additions:
+        suffix = ",".join(additions)
+        features = f"{features},{suffix}" if features else suffix
     no_default = feature_set.get("no_default_features", False)
 
     command = spec.get("command")

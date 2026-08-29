@@ -19,6 +19,13 @@ Rust PR Bench provides two interfaces backed by the same comparison and reportin
 - The reusable workflow precompiles and fans benchmark cases out across a dynamic job matrix. Use
   it for larger suites where parallel execution is worth the additional jobs and artifacts.
 
+Input syntax differs between the interfaces:
+
+- Root composite-action inputs are strings. Quote booleans and numbers, such as `"true"` and
+  `"3"`.
+- Reusable-workflow inputs use the types declared by `workflow_call`. Write booleans and numbers
+  without quotes, such as `true` and `3`.
+
 ## Root action
 
 The action requires an Ubuntu runner and a full checkout so both revisions are available. The
@@ -48,14 +55,13 @@ jobs:
         id: bench
         uses: terjekv/rust-pr-bench@v1
         with:
+          # Composite-action inputs are strings.
           backend: all
           auto_discover: "true"
           regression_threshold_pct_gungraun: "3"
           regression_threshold_pct_criterion: "10"
           fail_on_regression: "true"
 ```
-
-Action inputs are strings, including booleans and numbers. Quote those values as shown above.
 
 ## Parallel reusable workflow
 
@@ -76,6 +82,7 @@ jobs:
   bench:
     uses: terjekv/rust-pr-bench/.github/workflows/rust-pr-bench.yml@v1
     with:
+      # Reusable-workflow booleans and numbers are typed values.
       backend: all
       auto_discover: true
       feature_sets_json: >-
@@ -93,7 +100,7 @@ jobs:
 - Compares pull-request head and base revisions using isolated Git worktrees.
 - Supports Gungraun instruction/event counts, Criterion wall-clock measurements, or both.
 - Discovers standalone and workspace benchmark targets or accepts explicit commands.
-- Tests multiple Cargo feature sets.
+- Tests multiple Cargo feature sets and honors benchmark target `required-features`.
 - Supports benchmarks moved between workspace members.
 - Selects the exact Gungraun runner required by each benchmark executable.
 - Can execute an `iai-callgrind 0.16.1` benchmark from an older base revision during migration.
@@ -103,8 +110,8 @@ jobs:
 
 ## Inputs
 
-The action and reusable workflow share the inputs below. Action values are strings; reusable
-workflow booleans and numbers use their native YAML types.
+The action and reusable workflow share the inputs below. As noted above, action values are strings;
+reusable-workflow booleans and numbers use their native YAML types.
 
 | Input | Default | Description |
 | --- | --- | --- |
@@ -175,6 +182,7 @@ Object fields include:
 - `backend`: `gungraun` or `criterion`.
 - `command`: complete command override.
 - `manifest_path`, `package`, and `args`: Cargo command helpers.
+- `required_features`: benchmark-specific Cargo features that are always enabled.
 - `criterion_args`: per-benchmark Criterion arguments.
 - `head`, `base`, `head_command`, and `base_command`: explicit mappings when a benchmark moved or
   changed names.
@@ -204,6 +212,12 @@ IAI-Callgrind part of the new public backend API:
   {"name":"minimal","features":"serde","no_default_features":true}
 ]
 ```
+
+Autodiscovery reads `required-features` from each Cargo `[[bench]]` target and combines them with
+the selected feature set. Declare target-specific requirements there instead of placing them in a
+global feature set, which applies to every discovered benchmark. Workspace members without those
+target requirements are then left unchanged. Explicit benchmark objects can provide the equivalent
+`required_features` string or array.
 
 ## Intentional regression exceptions
 
