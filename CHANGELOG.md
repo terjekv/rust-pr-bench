@@ -7,6 +7,24 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-08-29
+
+### Added
+
+- Read Cargo benchmark target `required-features` during autodiscovery and enable them only for
+  the target that declares them.
+- Allow explicit benchmark specifications to declare `required_features` as a string or array.
+
+### Changed
+
+- Clarify why composite-action examples quote boolean and numeric inputs while reusable-workflow
+  examples use typed YAML values.
+
+### Fixed
+
+- Prevent workspace benchmark targets from being skipped when another package's benchmark needs
+  an opt-in Cargo feature.
+
 ## [1.0.0] - 2026-08-16
 
 ### Added
@@ -45,5 +63,6 @@ Rust PR Bench originated in
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 That repository retains the historical changelog and existing `v1`–`v3` compatibility releases.
 
-[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/terjekv/rust-pr-bench/releases/tag/v1.0.0

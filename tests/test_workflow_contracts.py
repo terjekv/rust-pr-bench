@@ -196,7 +196,7 @@ class WorkflowContractTests(unittest.TestCase):
             encoding="utf-8"
         )
         changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
-        version = "1.0.0"
+        version = "1.1.0"
         pattern = re.compile(
             rf"^## \[{re.escape(version)}\] - [^\n]*\n(?P<body>.*?)(?=^## |\Z)",
             re.MULTILINE | re.DOTALL,
@@ -208,7 +208,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn(r"(?=^## |\Z)", release)
         self.assertIsNotNone(match)
         body = match.group("body").strip() if match else ""
-        self.assertIn("Add a root composite action", body)
+        self.assertIn("Read Cargo benchmark target `required-features`", body)
         self.assertNotIn("Project history", body)
 
     def test_pr_comment_updates_are_best_effort(self) -> None:

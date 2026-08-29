@@ -80,6 +80,70 @@ class ExpandMatrixTests(unittest.TestCase):
                 },
             )
 
+    def test_workspace_discovery_applies_only_each_benchmark_required_features(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            (repo / "Cargo.toml").write_text(
+                """[workspace]
+members = ["crates/*"]
+
+[package]
+name = "application"
+version = "0.1.0"
+edition = "2021"
+
+[[bench]]
+name = "storage_criterion"
+harness = false
+required-features = ["postgres-bench"]
+
+[features]
+postgres-bench = []
+""",
+                encoding="utf-8",
+            )
+            (repo / "benches").mkdir()
+            (repo / "benches" / "storage_criterion.rs").write_text(
+                "// benchmark\n", encoding="utf-8"
+            )
+            member = repo / "crates" / "query"
+            (member / "benches").mkdir(parents=True)
+            (member / "Cargo.toml").write_text(
+                """[package]
+name = "query"
+version = "0.1.0"
+edition = "2021"
+
+[[bench]]
+name = "parse_callgrind"
+harness = false
+""",
+                encoding="utf-8",
+            )
+            (member / "benches" / "parse_callgrind.rs").write_text(
+                "// benchmark\n", encoding="utf-8"
+            )
+
+            discovered = expand_matrix.discover_benchmarks(repo, ".", "all")
+            matrix = expand_matrix.make_matrix(
+                discovered,
+                [{"name": "default", "features": "", "no_default_features": False}],
+                "",
+                "--noplot",
+            )
+            commands = {
+                item["benchmark_name"]: item["command"] for item in matrix["include"]
+            }
+
+            self.assertEqual(
+                commands["storage_criterion"],
+                "cargo bench --bench storage_criterion --features postgres-bench -- --noplot",
+            )
+            self.assertEqual(
+                commands["crates/query/parse_callgrind"],
+                "cargo bench --bench parse_callgrind --manifest-path crates/query/Cargo.toml",
+            )
+
     def test_discover_benchmarks_honors_globbed_workspace_excludes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = pathlib.Path(tmp)
@@ -115,6 +179,27 @@ class ExpandMatrixTests(unittest.TestCase):
         self.assertEqual(
             criterion_command,
             "cargo bench --bench bench_a -- --noplot --sample-size 10",
+        )
+
+    def test_build_command_combines_feature_set_and_required_features(self) -> None:
+        spec = {
+            "name": "bench_a",
+            "bench": "bench_a",
+            "required_features": ["runtime", "simd"],
+        }
+        feature_set = {
+            "name": "simd",
+            "features": "simd",
+            "no_default_features": False,
+        }
+
+        command = expand_matrix.build_command(
+            spec, feature_set, "", "gungraun", "--noplot"
+        )
+
+        self.assertEqual(
+            command,
+            "cargo bench --bench bench_a --features simd,runtime",
         )
 
     def test_cargo_args_are_before_criterion_separator(self) -> None:
