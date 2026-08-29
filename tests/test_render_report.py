@@ -208,6 +208,24 @@ class RenderReportTests(unittest.TestCase):
         self.assertIn("### Skipped Benchmarks (Missing in Base/Head)", markdown)
         self.assertIn("missing in base", markdown)
 
+    def test_unpaired_metrics_are_unknown_and_excluded_from_metric_average(self) -> None:
+        entry = {
+            "benchmark_name": "expanded_target",
+            "base_metrics": [
+                {"metric": "existing", "value": 100},
+                {"metric": "removed", "value": 50},
+            ],
+            "head_metrics": [
+                {"metric": "existing", "value": 110},
+                {"metric": "added", "value": 500},
+            ],
+        }
+
+        self.assertEqual(render_report.collect_metric_deltas(entry), [10.0])
+        breakdown = "\n".join(render_report.render_metric_breakdown(entry, 3.0))
+        self.assertIn(">added</span> | 0 | 500 | n/a | ⚪ unknown |", breakdown)
+        self.assertIn(">removed</span> | 50 | 0 | n/a | ⚪ unknown |", breakdown)
+
     def test_moved_and_error_entries_are_listed(self) -> None:
         results = [
             {
