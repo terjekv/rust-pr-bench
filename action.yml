@@ -39,6 +39,22 @@ inputs:
     description: Extra arguments appended to Cargo benchmark commands.
     required: false
     default: ""
+  setup_command:
+    description: Runtime setup command run separately for each head and base execution.
+    required: false
+    default: ""
+  readiness_command:
+    description: Command retried after setup until the service is ready.
+    required: false
+    default: ""
+  teardown_command:
+    description: Cleanup command always run after each head and base execution.
+    required: false
+    default: ""
+  readiness_timeout_seconds:
+    description: Maximum seconds to retry readiness_command for each execution.
+    required: false
+    default: "60"
   criterion_cli_args:
     description: Extra Criterion bench-binary arguments.
     required: false
@@ -202,6 +218,10 @@ runs:
         RUST_PR_BENCH_FEATURE_SETS_JSON: ${{ inputs.feature_sets_json }}
         RUST_PR_BENCH_WORKING_DIRECTORY: ${{ inputs.working_directory }}
         RUST_PR_BENCH_CARGO_ARGS: ${{ inputs.cargo_args }}
+        RUST_PR_BENCH_SETUP_COMMAND: ${{ inputs.setup_command }}
+        RUST_PR_BENCH_READINESS_COMMAND: ${{ inputs.readiness_command }}
+        RUST_PR_BENCH_TEARDOWN_COMMAND: ${{ inputs.teardown_command }}
+        RUST_PR_BENCH_READINESS_TIMEOUT_SECONDS: ${{ inputs.readiness_timeout_seconds }}
         RUST_PR_BENCH_CRITERION_CLI_ARGS: ${{ inputs.criterion_cli_args }}
         RUST_PR_BENCH_CRITERION_STATISTIC: ${{ inputs.criterion_statistic }}
         RUST_PR_BENCH_BASE_SHA: ${{ inputs.base_sha }}

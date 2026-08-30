@@ -7,6 +7,13 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Add isolated setup, readiness, and guaranteed teardown hooks for each head and base benchmark
+  execution, with environment-file handoff and captured lifecycle logs.
+- Exercise both public interfaces against a real PostgreSQL container with a `SELECT 1` smoke
+  benchmark in the pull-request self-test workflow.
+
 ## [1.1.1] - 2026-08-30
 
 ### Fixed

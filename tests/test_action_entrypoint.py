@@ -56,6 +56,7 @@ class ActionEntrypointTests(unittest.TestCase):
             )
             (repository / "bench.py").write_text(
                 """import json, os, pathlib
+assert os.environ['BENCH_TOKEN'] == os.environ['RUST_PR_BENCH_SIDE']
 value = float(pathlib.Path('value.txt').read_text())
 target = pathlib.Path(os.environ['CARGO_TARGET_DIR']) / 'criterion' / 'fixture' / 'new'
 target.mkdir(parents=True, exist_ok=True)
@@ -118,6 +119,18 @@ payload = {'mean': {'point_estimate': value, 'confidence_interval': {'lower_boun
                     "RUST_PR_BENCH_REGRESSION_THRESHOLD_PCT_CRITERION": "-1",
                     "RUST_PR_BENCH_FAIL_ON_REGRESSION": "false",
                     "RUST_PR_BENCH_COMMENT_MODE": "never",
+                    "RUST_PR_BENCH_SETUP_COMMAND": (
+                        "printf 'BENCH_TOKEN=%s\\n' \"$RUST_PR_BENCH_SIDE\" >> "
+                        "\"$RUST_PR_BENCH_ENV_FILE\""
+                    ),
+                    "RUST_PR_BENCH_READINESS_COMMAND": (
+                        "test \"$BENCH_TOKEN\" = \"$RUST_PR_BENCH_SIDE\""
+                    ),
+                    "RUST_PR_BENCH_TEARDOWN_COMMAND": (
+                        "printf '%s\\n' \"$RUST_PR_BENCH_SIDE\" >> "
+                        "\"$RUST_PR_BENCH_REPOSITORY/../lifecycle-events\""
+                    ),
+                    "RUST_PR_BENCH_READINESS_TIMEOUT_SECONDS": "2",
                 }
             )
             work_dir = root / "work"
@@ -145,6 +158,10 @@ payload = {'mean': {'point_estimate': value, 'confidence_interval': {'lower_boun
             report = pathlib.Path(outputs["report_path"])
             self.assertTrue(report.is_file())
             self.assertIn("Criterion Benchmark Report", report.read_text(encoding="utf-8"))
+            self.assertEqual(
+                (work_dir / "lifecycle-events").read_text(encoding="utf-8").splitlines(),
+                ["head", "base"],
+            )
 
 
 if __name__ == "__main__":

@@ -103,6 +103,7 @@ jobs:
 - Tests multiple Cargo feature sets and honors benchmark target `required-features`.
 - Forms target-level deltas only from metric identities present in both revisions; added or removed
   benchmark functions remain visible as unknown metrics without skewing the aggregate.
+- Manages per-execution setup, readiness, and guaranteed teardown for service-backed benchmarks.
 - Supports benchmarks moved between workspace members.
 - Selects the exact Gungraun runner required by each benchmark executable.
 - Can execute an `iai-callgrind 0.16.1` benchmark from an older base revision during migration.
@@ -125,6 +126,10 @@ reusable-workflow booleans and numbers use their native YAML types.
 | `working_directory` | `.` | Cargo project or workspace directory |
 | `toolchain` | `stable` | Rust toolchain |
 | `cargo_args` | empty | Extra Cargo arguments |
+| `setup_command` | empty | Runtime setup run separately for head and base |
+| `readiness_command` | empty | Readiness probe retried after setup |
+| `teardown_command` | empty | Cleanup always attempted after each execution |
+| `readiness_timeout_seconds` | `60` | Per-execution readiness timeout |
 | `criterion_cli_args` | `--noplot` | Criterion bench-binary arguments |
 | `criterion_statistic` | `mean` | `mean` or `median` |
 | `base_sha` | PR base SHA | Explicit base revision |
@@ -139,6 +144,64 @@ reusable-workflow booleans and numbers use their native YAML types.
 The reusable workflow resolves its helper scripts from the exact called-workflow commit. It also
 exposes `action_repository` and `action_ref` overrides for testing a fork or pull-request revision
 of the workflow implementation.
+
+## Service lifecycle hooks
+
+Service-backed benchmarks can use runtime lifecycle commands without putting Docker or process
+management in the benchmark binary:
+
+```yaml
+setup_command: |
+  NAME="bench-postgres-${RUST_PR_BENCH_EXECUTION_ID}"
+  docker run --detach --name "$NAME" --publish-all \
+    --env POSTGRES_PASSWORD=bench \
+    postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+  PORT="$(docker port "$NAME" 5432/tcp | sed 's/.*://')"
+  printf 'PG_CONTAINER=%s\n' "$NAME" >> "$RUST_PR_BENCH_ENV_FILE"
+  printf 'DATABASE_URL=postgres://postgres:bench@127.0.0.1:%s/postgres\n' "$PORT" \
+    >> "$RUST_PR_BENCH_ENV_FILE"
+readiness_command: |
+  # The image briefly starts a temporary server while initializing. Wait until
+  # the final PostgreSQL server has replaced the entrypoint as PID 1.
+  docker exec "$PG_CONTAINER" sh -ceu \
+    'test "$(cat /proc/1/comm)" = postgres'
+  docker exec "$PG_CONTAINER" pg_isready --username postgres
+teardown_command: |
+  docker rm --force "$PG_CONTAINER"
+readiness_timeout_seconds: 90
+```
+
+The lifecycle is `setup` → `readiness` → benchmark → `teardown` for head, followed by the same
+fresh sequence for base. Each command runs from `working_directory` after the relevant revision is
+checked out. Readiness is retried once per second until it succeeds or its timeout expires. Teardown
+is attempted even when setup, readiness, compilation, or measurement fails; only runner termination
+or job cancellation can prevent it.
+
+The reusable workflow runs every benchmark/feature/backend matrix case in its own job. The root
+action runs cases sequentially, but still gives every head and base execution a separate lifecycle.
+Rust PR Bench does not carry lifecycle environment state between executions. Use
+`RUST_PR_BENCH_EXECUTION_ID` for unique container, database, network, or volume names when matrix
+jobs may run concurrently. A caller that deliberately wants shared state must make its commands
+connect to a caller-managed external service explicitly.
+
+Lifecycle commands receive these environment variables:
+
+- `RUST_PR_BENCH_SIDE`: `head` or `base`.
+- `RUST_PR_BENCH_EXECUTION_ID`: unique, shell-safe identifier for this execution.
+- `RUST_PR_BENCH_ENV_FILE`: fresh per-execution file for passing values to later stages.
+- `RUST_PR_BENCH_REPOSITORY`: absolute caller-repository checkout path.
+- `RUST_PR_BENCH_WORKING_DIRECTORY`: absolute command working directory.
+- `CARGO_TARGET_DIR`: isolated target directory used by the benchmark.
+
+The setup command can append `NAME=value` lines to `RUST_PR_BENCH_ENV_FILE`. An optional `export `
+prefix is accepted; values are treated literally, without shell evaluation. These values are loaded
+for readiness, the benchmark, and teardown, then the file is deleted. `CARGO_TARGET_DIR` and
+`RUST_PR_BENCH_*` variables cannot be overridden through the file. Do not print secrets: command
+output is captured in lifecycle logs.
+
+The reusable workflow uploads `head.setup.log`, `head.readiness.log`, `head.teardown.log`, and their
+base equivalents with the case result whenever the corresponding commands are configured. Failed
+stage output is also included in the benchmark error diagnostics and report stage label.
 
 ## Outputs
 
@@ -278,8 +341,8 @@ cargo clippy --manifest-path examples/sample-rust-app/Cargo.toml \
   --all-targets --all-features -- -D warnings
 ```
 
-The sample application in `examples/sample-rust-app` exercises Gungraun, Criterion, mixed runner
-versions, both public interfaces, and regression outputs in CI.
+The sample CI workflow exercises Gungraun, Criterion, mixed runner versions, both public interfaces,
+regression outputs, and the service lifecycle hooks against a real PostgreSQL `SELECT 1` query.
 
 ## License
 

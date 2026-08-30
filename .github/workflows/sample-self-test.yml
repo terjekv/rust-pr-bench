@@ -37,6 +37,13 @@ jobs:
               {"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}
             ]
           criterion_cli_args: "--noplot --sample-size 20 --measurement-time 1"
+          setup_command: |
+            printf 'SAMPLE_LIFECYCLE_SIDE=%s\n' "$RUST_PR_BENCH_SIDE" >> "$RUST_PR_BENCH_ENV_FILE"
+          readiness_command: |
+            test "$SAMPLE_LIFECYCLE_SIDE" = "$RUST_PR_BENCH_SIDE"
+          teardown_command: |
+            test "$SAMPLE_LIFECYCLE_SIDE" = "$RUST_PR_BENCH_SIDE"
+          readiness_timeout_seconds: "5"
           regression_threshold_pct_gungraun: "2"
           regression_threshold_pct_criterion: "10"
           comment_mode: never
@@ -71,10 +78,109 @@ jobs:
       feature_sets_json: '[{"name":"default","features":""},{"name":"alt-impl","features":"alt-impl"}]'
       criterion_cli_args: "--noplot --sample-size 20 --measurement-time 1"
       criterion_statistic: median
+      setup_command: |
+        printf 'SAMPLE_LIFECYCLE_SIDE=%s\n' "$RUST_PR_BENCH_SIDE" >> "$RUST_PR_BENCH_ENV_FILE"
+      readiness_command: |
+        test "$SAMPLE_LIFECYCLE_SIDE" = "$RUST_PR_BENCH_SIDE"
+      teardown_command: |
+        test "$SAMPLE_LIFECYCLE_SIDE" = "$RUST_PR_BENCH_SIDE"
+      readiness_timeout_seconds: 5
       regression_threshold_pct_gungraun: 2
       regression_threshold_pct_criterion: 10
       fail_on_regression: false
       comment_mode: always
+
+  action-postgres-lifecycle:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Run PostgreSQL lifecycle smoke test through the root action
+        id: bench
+        uses: ./
+        with:
+          backend: criterion
+          working_directory: examples/sample-rust-app
+          auto_discover: "false"
+          benchmarks_json: >-
+            [
+              {
+                "name":"postgres-select",
+                "command":"python3 \"$POSTGRES_SMOKE_SCRIPT\"",
+                "backend":"criterion"
+              }
+            ]
+          setup_command: |
+            CONTAINER="rust-pr-bench-pg-${RUST_PR_BENCH_EXECUTION_ID}"
+            if [ -n "${GITHUB_ACTION_PATH:-}" ]; then
+              FIXTURE="$GITHUB_ACTION_PATH/tests/fixtures/postgres_select_smoke.py"
+            else
+              FIXTURE="$RUST_PR_BENCH_REPOSITORY/../action-src/tests/fixtures/postgres_select_smoke.py"
+            fi
+            test -f "$FIXTURE"
+            printf 'PG_CONTAINER=%s\n' "$CONTAINER" >> "$RUST_PR_BENCH_ENV_FILE"
+            printf 'POSTGRES_SMOKE_SCRIPT=%s\n' "$FIXTURE" >> "$RUST_PR_BENCH_ENV_FILE"
+            docker run --detach --name "$CONTAINER" \
+              --env POSTGRES_PASSWORD=bench \
+              --env POSTGRES_DB=bench \
+              postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+          readiness_command: |
+            docker exec "$PG_CONTAINER" sh -ceu \
+              'test "$(cat /proc/1/comm)" = postgres'
+            docker exec "$PG_CONTAINER" pg_isready --username postgres --dbname bench
+          teardown_command: |
+            docker rm --force "$PG_CONTAINER"
+          readiness_timeout_seconds: "60"
+          comment_mode: never
+
+      - name: Validate PostgreSQL action result
+        env:
+          HAD_ERRORS: ${{ steps.bench.outputs.had_errors }}
+          REPORT_PATH: ${{ steps.bench.outputs.report_path }}
+        run: |
+          test "$HAD_ERRORS" = "false"
+          test -f "$REPORT_PATH"
+          grep -q "postgres-select" "$REPORT_PATH"
+
+  workflow-postgres-lifecycle:
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      backend: criterion
+      working_directory: examples/sample-rust-app
+      auto_discover: false
+      benchmarks_json: >-
+        [
+          {
+            "name":"postgres-select",
+            "command":"python3 \"$POSTGRES_SMOKE_SCRIPT\"",
+            "backend":"criterion"
+          }
+        ]
+      setup_command: |
+        CONTAINER="rust-pr-bench-pg-${RUST_PR_BENCH_EXECUTION_ID}"
+        if [ -n "${GITHUB_ACTION_PATH:-}" ]; then
+          FIXTURE="$GITHUB_ACTION_PATH/tests/fixtures/postgres_select_smoke.py"
+        else
+          FIXTURE="$RUST_PR_BENCH_REPOSITORY/../action-src/tests/fixtures/postgres_select_smoke.py"
+        fi
+        test -f "$FIXTURE"
+        printf 'PG_CONTAINER=%s\n' "$CONTAINER" >> "$RUST_PR_BENCH_ENV_FILE"
+        printf 'POSTGRES_SMOKE_SCRIPT=%s\n' "$FIXTURE" >> "$RUST_PR_BENCH_ENV_FILE"
+        docker run --detach --name "$CONTAINER" \
+          --env POSTGRES_PASSWORD=bench \
+          --env POSTGRES_DB=bench \
+          postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+      readiness_command: |
+        docker exec "$PG_CONTAINER" sh -ceu \
+          'test "$(cat /proc/1/comm)" = postgres'
+        docker exec "$PG_CONTAINER" pg_isready --username postgres --dbname bench
+      teardown_command: |
+        docker rm --force "$PG_CONTAINER"
+      readiness_timeout_seconds: 60
+      comment_mode: never
 
   workflow-mixed-runner-compatibility:
     uses: ./.github/workflows/rust-pr-bench.yml

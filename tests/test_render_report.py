@@ -242,6 +242,7 @@ class RenderReportTests(unittest.TestCase):
                 "base_error": True,
                 "head_error": False,
                 "base_error_code": 101,
+                "base_error_stage": "setup",
                 "moved": True,
                 "move_source": "crates/old",
                 "move_target": "crates/new",
@@ -269,7 +270,7 @@ class RenderReportTests(unittest.TestCase):
         self.assertIn("### Moved Benchmarks", markdown)
         self.assertIn("`crates/old` -> `crates/new`", markdown)
         self.assertIn("### Benchmark Errors", markdown)
-        self.assertIn("base exit 101", markdown)
+        self.assertIn("base setup exit 101", markdown)
 
     def test_failed_entries_are_excluded_from_summary_and_history_aggregates(self) -> None:
         failed = {
