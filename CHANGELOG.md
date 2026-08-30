@@ -7,12 +7,18 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-08-30
+
 ### Added
 
 - Add isolated setup, readiness, and guaranteed teardown hooks for each head and base benchmark
   execution, with environment-file handoff and captured lifecycle logs.
 - Exercise both public interfaces against a real PostgreSQL container with a `SELECT 1` smoke
   benchmark in the pull-request self-test workflow.
+
+### Changed
+
+- Update `taiki-e/install-action` and refresh the sample application's transitive Rust dependencies.
 
 ## [1.1.1] - 2026-08-30
 
@@ -78,7 +84,8 @@ Rust PR Bench originated in
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 That repository retains the historical changelog and existing `v1`–`v3` compatibility releases.
 
-[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/terjekv/rust-pr-bench/releases/tag/v1.0.0
