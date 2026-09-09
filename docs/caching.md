@@ -187,7 +187,9 @@ libraries, complete build-script `OUT_DIR` trees, and declared runtime assets.
 Each file has a relative path, size, SHA-256 checksum and executable-bit marker.
 The complete file set and identity are checked after restore and again before
 execution, including after artifact distribution. Empty directories and execute
-bits are restored when artifact transport drops them. Missing, changed, unexpected,
+bits are restored when artifact transport drops them. Generated output directories
+and declared asset paths are replaced before each side runs, including removal of
+files that exist only in the other revision. Missing, changed, unexpected,
 unsafe or unsupported files reject the bundle and fall back to compilation.
 Cache checksums detect incomplete/corrupt bundles; they do not replace GitHub's
 cache access controls or attest to the publisher's trustworthiness.

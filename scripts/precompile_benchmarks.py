@@ -30,6 +30,7 @@ from executable_cache import (
     ExecutableCache,
     case_identity,
     identity as executable_identity,
+    relative_path,
 )
 
 LOCAL_DOWNLOADS: dict[str, dict[str, Any]] = {}
@@ -70,6 +71,12 @@ def copy_runtime_artifacts(
 ) -> bool:
     paths: set[pathlib.Path] = set()
     complete = True
+    directories_path = runtime_dir.parent / "runtime-directories.json"
+    directories = (
+        set(json.loads(directories_path.read_text()))
+        if directories_path.exists()
+        else set()
+    )
     for line in output.splitlines():
         try:
             message = json.loads(line)
@@ -80,6 +87,9 @@ def copy_runtime_artifacts(
             if directory.is_dir() and directory.resolve().is_relative_to(
                 target_dir.resolve()
             ):
+                relative = directory.relative_to(target_dir).as_posix()
+                relative_path(relative)
+                directories.add(relative)
                 destination = runtime_dir / directory.relative_to(target_dir)
                 destination.mkdir(parents=True, exist_ok=True)
                 paths.update(
@@ -115,6 +125,8 @@ def copy_runtime_artifacts(
         destination = runtime_dir / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    if directories:
+        directories_path.write_text(json.dumps(sorted(directories)))
     return complete
 
 

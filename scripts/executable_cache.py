@@ -362,6 +362,11 @@ class ExecutableCache:
                 copy_tree(output / case["id"], self.directory / case["id"])
             if (output / "_runtime").exists():
                 copy_tree(output / "_runtime", self.directory / "_runtime")
+            if (output / "runtime-directories.json").exists():
+                copy_tree(
+                    output / "runtime-directories.json",
+                    self.directory / "runtime-directories.json",
+                )
             repository = pathlib.Path(self.identity["repository"])
             for name in self.identity["runtime_paths"]:
                 path = repository / name

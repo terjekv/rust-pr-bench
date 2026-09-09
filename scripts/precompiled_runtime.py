@@ -7,7 +7,19 @@ import shlex
 import shutil
 import subprocess
 
-from executable_cache import source_revision, verify_bundle
+from executable_cache import relative_path, source_revision, verify_bundle
+
+
+def clear_declared_paths(root: pathlib.Path, names: list[str]) -> None:
+    """Replace snapshots without retaining files that exist only in the other side."""
+    destinations = [root / relative_path(name) for name in names]
+    if any(not path.resolve().is_relative_to(root.resolve()) for path in destinations):
+        raise ValueError("runtime directory escapes its root")
+    for destination in destinations:
+        if destination.is_dir() and not destination.is_symlink():
+            shutil.rmtree(destination)
+        elif destination.exists() or destination.is_symlink():
+            destination.unlink()
 
 
 def command_for(
@@ -37,6 +49,7 @@ def command_for(
                     (group_dir / name).chmod(0o755 if info["executable"] else 0o644)
             assets = group_dir / "_assets"
             if assets.exists():
+                clear_declared_paths(repository, manifest["identity"]["runtime_paths"])
                 for source in assets.rglob("*"):
                     destination = repository / source.relative_to(assets)
                     if not destination.resolve().is_relative_to(repository):
@@ -46,6 +59,10 @@ def command_for(
                     else:
                         destination.parent.mkdir(parents=True, exist_ok=True)
                         shutil.copy2(source, destination)
+        directories_path = group_dir / "runtime-directories.json"
+        if directories_path.exists():
+            directories = json.loads(directories_path.read_text())
+            clear_declared_paths(target, directories)
     except (OSError, ValueError, KeyError, TypeError, subprocess.CalledProcessError):
         return fallback
     runtime = group_dir / "_runtime"

@@ -57,6 +57,11 @@ harness = false
     std::fs::write(out.join("value"), "generated-runtime").unwrap();
     std::fs::create_dir_all("generated").unwrap();
     std::fs::write("generated/asset", "repository-runtime").unwrap();
+    let head = std::fs::read_to_string("src/lib.rs").unwrap().contains("110");
+    for path in [out.join("head-only"), std::path::PathBuf::from("generated/head-only")] {
+        if head { std::fs::write(path, "head").unwrap(); }
+        else { let _ = std::fs::remove_file(path); }
+    }
 }
 """)
             bench = r"""fn main() {
@@ -70,6 +75,10 @@ harness = false
     assert!(result.status.success());
     let value = String::from_utf8(result.stdout).unwrap();
     assert_eq!(value.trim().parse::<u64>().unwrap(), reuse_fixture::value());
+    assert_eq!(std::path::Path::new(concat!(env!("OUT_DIR"), "/head-only")).exists(), reuse_fixture::value() == 110);
+    if std::env::var("RUST_PR_BENCH_CACHE_BINARIES").as_deref() == Ok("true") {
+        assert_eq!(std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/generated/head-only")).exists(), reuse_fixture::value() == 110);
+    }
     let target = std::path::PathBuf::from(std::env::var("CARGO_TARGET_DIR").unwrap())
         .join("criterion/fixture/new");
     std::fs::create_dir_all(&target).unwrap();
