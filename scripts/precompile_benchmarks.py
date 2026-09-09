@@ -287,6 +287,9 @@ def compile_group(
                 executables = ExecutableCache(
                     repo_path, exact_identity, writer=side == "head" or not same_peer
                 )
+                executables.cache.record["key_components"].update(
+                    {f"build.{key}": value for key, value in key_components.items()}
+                )
                 reused = executables.restore(output_dir)
                 if reused is not None:
                     append_record(

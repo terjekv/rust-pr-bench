@@ -44,6 +44,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+      # Hosted runner images can roll over between cold and warm jobs. This
+      # restores the earlier entry when compatible, or seeds this runner's image.
+      - name: Ensure a cache for the current runner image
+        uses: ./
+        with:
+          backend: criterion
+          working_directory: examples/sample-rust-app
+          benchmarks_json: '["sample_criterion_bench"]'
+          compile_only: "true"
+          cache_binaries: "false"
+          cache_namespace: self-test-${{ github.run_id }}-${{ github.run_attempt }}
+          comment_mode: never
+      - name: Remove local compilation outputs before restore
+        run: |
+          python3 - <<'PY'
+          import pathlib, shutil
+          for target in pathlib.Path(".rust-pr-bench-cache").glob("*/target"):
+              shutil.rmtree(target)
+          PY
       - uses: ./
         id: bench
         with:
@@ -105,6 +124,25 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+      # Hosted runner images can roll over between cold and warm jobs. This
+      # restores the earlier entry when compatible, or seeds this runner's image.
+      - name: Ensure a cache for the current runner image
+        uses: ./
+        with:
+          backend: all
+          working_directory: examples/sample-rust-app
+          benchmarks_json: '[{"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},{"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}]'
+          compile_only: "true"
+          cache_binaries: "true"
+          cache_namespace: executables-self-test-${{ github.run_id }}-${{ github.run_attempt }}
+          comment_mode: never
+      - name: Remove local compilation outputs before restore
+        run: |
+          python3 - <<'PY'
+          import pathlib, shutil
+          for target in pathlib.Path(".rust-pr-bench-cache").glob("*/target"):
+              shutil.rmtree(target)
+          PY
       - uses: ./
         id: bench
         with:
@@ -194,8 +232,21 @@ jobs:
           print(json.dumps(records, indent=2))
           bundles = [r for r in records if r.get("kind") == "executables"]
           assert len(bundles) == 2, records
-          assert all(r["restore"] == "exact" and r["executables_reused"] == 2 for r in bundles), bundles
-          assert not any("compile_seconds" in r or r.get("kind") in ("build", "downloads") for r in records), records
+          all_builds = [json.loads(line) for path in pathlib.Path("results").rglob("performance.jsonl") for line in path.read_text().splitlines()]
+          seed = next(r for r in all_builds if r.get("kind") == "executables" and r.get("save") == "saved")
+          for bundle in bundles:
+              side = bundle["label"].split()[0]
+              work = [r for r in records if r.get("label", "").startswith(side + " ") and r.get("kind") != "executables"]
+              if bundle["restore"] == "exact":
+                  assert bundle["executables_reused"] == 2, bundle
+                  assert not any("compile_seconds" in r or r.get("kind") in ("build", "downloads") for r in work), work
+              else:
+                  assert bundle["restore"] == "miss", bundle
+                  before, after = seed["key_components"], bundle["key_components"]
+                  assert before["build.image"] != after["build.image"], (seed, bundle)
+                  assert all(before[k] == after[k] for k in before if k not in ("build", "build.image")), (seed, bundle)
+                  assert any(r.get("compile_seconds", 0) > 0 for r in work), work
+                  print("Expected executable invalidation after hosted runner image update:", side)
           summaries = list(pathlib.Path("reports").rglob("summary-*.json"))
           assert len(summaries) == 2, summaries
           for path in summaries:
