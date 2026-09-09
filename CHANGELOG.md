@@ -7,21 +7,36 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-09-10
+
 ### Added
 
-- Persist Cargo downloads, Cargo build outputs, and exact-version runner installations in both
-  interfaces, with namespace, enable/save controls and explicit matrix writer selection.
-- Add compile-only cache warming on main, cache diagnostics, compilation timings and Cargo
-  fresh/rebuilt artifact counts. Include available job and binary-transfer timings in reports.
-- Exercise cold cache saves and restores across jobs in CI.
+- Cache Cargo downloads, compiled build outputs, and exact-version Gungraun/IAI runners in both
+  interfaces, with `cache`, `cache_namespace`, and `cache_save` controls and explicit writer selection.
+- Add opt-in executable reuse with `cache_binaries`, `binary_cache_key`, and `binary_cache_paths`.
+  Exact source/build matches restore verified runtime bundles and skip Cargo compilation, linking,
+  and dependency-cache transfers while running fresh benchmark measurements.
+- Add `compile_only` for main-branch cache warming and document compatible sharing with caller CI.
+- Report cache outcomes, restore/save timings, sizes, Cargo fresh/rebuilt counts, executable reuse,
+  and available job and artifact-transfer timings. Expose `performance_path` in the composite action.
+- Verify cold/warm caches through both public interfaces, including exact executable hits and
+  expected invalidation when hosted runner images change.
 
 ### Changed
 
-- Compile composite-action benchmark cases together by revision while retaining isolated
-  measurements and activating each side's runtime binaries immediately before execution.
+- Compile compatible composite-action cases together by revision while retaining separate
+  measurements and setup/readiness/teardown lifecycles.
+- Preserve embedded runtime paths with stable private worktrees when executable reuse is enabled.
+- Bundle Cargo-reported helper binaries, shared libraries, build-script outputs, and declared assets;
+  verify their identity and complete file manifest before executing restored benchmarks.
 
+### Fixed
 
-## [Unreleased]
+- Replace generated runtime directories and declared asset snapshots before each revision runs,
+  removing files that exist only in the other revision.
+- Fall back to Cargo for incomplete or incompatible executable bundles and exclude native-CPU
+  compiled outputs from persistent reuse, including target-specific Rust flags.
+- Report competing cache reservations as `contended`, with key-component diagnostics for misses.
 
 ## [1.2.0] - 2026-08-30
 
@@ -100,7 +115,8 @@ Rust PR Bench originated in
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 That repository retains the historical changelog and existing `v1`–`v3` compatibility releases.
 
-[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.0.0...v1.1.0
