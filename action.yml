@@ -51,6 +51,18 @@ inputs:
     description: Allow elected jobs to save cache entries; false restores only.
     required: false
     default: "true"
+  cache_binaries:
+    description: Reuse exact benchmark executables across runs; requires reproducible builds.
+    required: false
+    default: "false"
+  binary_cache_key:
+    description: Additional identity for external build inputs and custom environment.
+    required: false
+    default: ""
+  binary_cache_paths:
+    description: JSON array of additional repository-relative runtime files or directories.
+    required: false
+    default: "[]"
   compile_only:
     description: Compile head benchmarks and warm caches without running measurements.
     required: false
@@ -235,6 +247,9 @@ runs:
         RUST_PR_BENCH_CACHE: ${{ inputs.cache }}
         RUST_PR_BENCH_CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
         RUST_PR_BENCH_CACHE_SAVE: ${{ inputs.cache_save }}
+        RUST_PR_BENCH_CACHE_BINARIES: ${{ inputs.cache_binaries }}
+        RUST_PR_BENCH_BINARY_CACHE_KEY: ${{ inputs.binary_cache_key }}
+        RUST_PR_BENCH_BINARY_CACHE_PATHS: ${{ inputs.binary_cache_paths }}
         RUST_PR_BENCH_COMPILE_ONLY: ${{ inputs.compile_only }}
         RUST_PR_BENCH_BACKEND: ${{ inputs.backend }}
         RUST_PR_BENCH_BENCHMARKS_JSON: ${{ inputs.benchmarks_json }}

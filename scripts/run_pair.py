@@ -729,7 +729,7 @@ def main() -> int:
         git_checkout(repo_path, args.head_sha)
         if args.head_precompiled:
             head_command = command_for(
-                pathlib.Path(args.head_precompiled), args.head_run_args, head_command
+                pathlib.Path(args.head_precompiled), args.head_run_args, head_command, workdir=workdir
             )
         head = run_execution(
             head_command,
@@ -750,7 +750,7 @@ def main() -> int:
         git_checkout(repo_path, args.base_sha)
         if args.base_precompiled:
             base_command = command_for(
-                pathlib.Path(args.base_precompiled), args.base_run_args, base_command
+                pathlib.Path(args.base_precompiled), args.base_run_args, base_command, workdir=workdir
             )
         base = run_execution(
             base_command,

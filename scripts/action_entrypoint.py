@@ -17,6 +17,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from build_cache import build_identity, cache_root
+from benchmark_worktree import benchmark_worktree
 from expand_matrix import make_build_matrix
 from precompile_benchmarks import compile_group
 from performance_report import collect as collect_performance
@@ -375,19 +376,7 @@ def main() -> int:
                 f"{label} revision {revision!r} is unavailable; checkout with fetch-depth: 0"
             )
 
-    benchmark_repository = work_dir / "repository"
-    run(
-        [
-            "git",
-            "worktree",
-            "add",
-            "--detach",
-            str(benchmark_repository),
-            head_sha,
-        ],
-        cwd=source_repository,
-    )
-    try:
+    with benchmark_worktree(source_repository, work_dir, head_sha) as benchmark_repository:
         overrides = prepare_regression_overrides(
             work_dir, action_input("regression_override_label")
         )
@@ -413,6 +402,7 @@ def main() -> int:
                 group["cases"], work_dir / "precompiled" / group["group_id"] / group["side"],
                 group_id=group["group_id"], side=group["side"],
                 peer_identity=head_identities.get(group["group_id"]),
+                peer_ref=head_sha, peer_cases=group["peer_cases"],
                 download_writer=group["download_writer"], allow_native=True,
             )
             build_errors |= not all(item["precompiled"] for item in results)
@@ -474,12 +464,6 @@ def main() -> int:
                 "performance_path": str(performance_path),
                 "should_fail": str(should_fail).lower(),
             }
-        )
-    finally:
-        run(
-            ["git", "worktree", "remove", "--force", str(benchmark_repository)],
-            cwd=source_repository,
-            check=False,
         )
     return 0
 

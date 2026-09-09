@@ -15,6 +15,12 @@ from testlib import REPO_ROOT
 @unittest.skipUnless(shutil.which("cargo"), "Cargo is required")
 class CompilationReuseTests(unittest.TestCase):
     def test_multiple_benches_reuse_builds_and_run_correct_side_runtime(self):
+        self.run_fixture()
+
+    def test_executables_survive_fresh_jobs_and_measurements_run_again(self):
+        self.run_fixture(executable_reuse=True)
+
+    def run_fixture(self, *, executable_reuse=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             repo = root / "repo"
@@ -45,7 +51,21 @@ harness = false
             (repo / "src/bin/helper.rs").write_text(
                 'fn main() { println!("{}", reuse_fixture::value()); }\n'
             )
+            (repo / ".gitignore").write_text("generated/\n")
+            (repo / "build.rs").write_text(r"""fn main() {
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").unwrap());
+    std::fs::write(out.join("value"), "generated-runtime").unwrap();
+    std::fs::create_dir_all("generated").unwrap();
+    std::fs::write("generated/asset", "repository-runtime").unwrap();
+}
+""")
             bench = r"""fn main() {
+    assert_eq!(std::fs::read_to_string(concat!(env!("OUT_DIR"), "/value")).unwrap(), "generated-runtime");
+    assert_eq!(std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/generated/asset")).unwrap(), "repository-runtime");
+    if let Ok(path) = std::env::var("MEASUREMENT_LOG") {
+        use std::io::Write;
+        writeln!(std::fs::OpenOptions::new().create(true).append(true).open(path).unwrap(), "measured").unwrap();
+    }
     let result = std::process::Command::new(env!("CARGO_BIN_EXE_helper")).output().unwrap();
     assert!(result.status.success());
     let value = String::from_utf8(result.stdout).unwrap();
@@ -81,22 +101,76 @@ harness = false
                 "RUST_PR_BENCH_AUTO_DISCOVER": "false",
                 "RUST_PR_BENCH_CARGO_ARGS": "--offline",
             }
+            if executable_reuse:
+                transport = root / "cache-transport"
+                transport.write_text(
+                    f"#!{sys.executable}\n"
+                    + r"""
+import json, pathlib, shutil, sys
+request = json.loads(pathlib.Path(sys.argv[2]).read_text())
+remote = pathlib.Path(__file__).parent / "remote" / request["key"]
+result = {"status": "miss" if request["operation"] == "restore" else "not-saved"}
+if "-executables-" in request["key"]:
+    assert request["restore_keys"] == [], request
+    path = pathlib.Path(request["paths"][0])
+    if request["operation"] == "save":
+        shutil.copytree(path, remote, dirs_exist_ok=True)
+        result = {"status": "saved"}
+    elif remote.exists():
+        shutil.copytree(remote, path)
+        result = {"status": "exact", "matched_key": request["key"]}
+pathlib.Path(sys.argv[3]).write_text(json.dumps(result))
+"""
+                )
+                transport.chmod(0o755)
+                wrappers = root / "wrappers"
+                wrappers.mkdir()
+                wrapper = wrappers / "cargo"
+                real_cargo = shutil.which("cargo")
+                wrapper.write_text(
+                    f"#!{sys.executable}\n"
+                    + f"""
+import os, pathlib, sys
+if len(sys.argv) > 1 and sys.argv[1] == "bench":
+    marker = pathlib.Path({str(root / "compilation-forbidden")!r})
+    if marker.exists():
+        raise SystemExit("unexpected Cargo compilation on executable cache hit")
+os.execv({real_cargo!r}, [{real_cargo!r}, *sys.argv[1:]])
+"""
+                )
+                wrapper.chmod(0o755)
+                environment.update(
+                    {
+                        "RUST_PR_BENCH_CACHE": "true",
+                        "RUST_PR_BENCH_CACHE_BINARIES": "true",
+                        "RUST_PR_BENCH_BINARY_CACHE_PATHS": '["generated"]',
+                        "RUST_PR_BENCH_NODE": str(transport),
+                        "ACTIONS_RUNTIME_TOKEN": "test",
+                        "MEASUREMENT_LOG": str(root / "measurements"),
+                        "PATH": str(wrappers) + os.pathsep + environment["PATH"],
+                    }
+                )
+
+            def execute(work):
+                result = subprocess.run(
+                    [
+                        sys.executable,
+                        str(REPO_ROOT / "scripts/action_entrypoint.py"),
+                        "--repository",
+                        str(repo),
+                        "--work-dir",
+                        str(work),
+                    ],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                return result
+
             work = root / "work"
-            result = subprocess.run(
-                [
-                    sys.executable,
-                    str(REPO_ROOT / "scripts/action_entrypoint.py"),
-                    "--repository",
-                    str(repo),
-                    "--work-dir",
-                    str(work),
-                ],
-                env=environment,
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            execute(work)
             results = list((work / "artifacts").rglob("result.json"))
             self.assertEqual(len(results), 2)
             for path in results:
@@ -117,3 +191,39 @@ harness = false
             self.assertFalse(
                 list((repo / ".rust-pr-bench-cache").rglob("estimates.json"))
             )
+
+            if executable_reuse:
+                cold_records = json.loads((work / "performance.json").read_text())
+                cold_executables = [
+                    r for r in cold_records if r.get("kind") == "executables"
+                ]
+                self.assertEqual(len(cold_executables), 2, cold_records)
+                self.assertTrue(
+                    all(r["save"] == "saved" for r in cold_executables),
+                    cold_executables,
+                )
+                for target in (repo / ".rust-pr-bench-cache").glob("*/target"):
+                    shutil.rmtree(target)
+                (root / "compilation-forbidden").touch()
+                warm = root / "new-job-work-directory"
+                execute(warm)
+                records = json.loads((warm / "performance.json").read_text())
+                self.assertEqual(len(records), 2, records)
+                self.assertTrue(
+                    all(
+                        r["kind"] == "executables" and r["restore"] == "exact"
+                        for r in records
+                    ),
+                    records,
+                )
+                self.assertEqual(sum(r["executables_reused"] for r in records), 4)
+                for path in (warm / "artifacts").rglob("result.json"):
+                    data = json.loads(path.read_text())
+                    self.assertEqual(data["head_total"], 110, data)
+                    self.assertEqual(data["base_total"], 100, data)
+                self.assertEqual(
+                    len((root / "measurements").read_text().splitlines()), 8
+                )
+                self.assertFalse(list((root / "remote").rglob("estimates.json")))
+                self.assertFalse(list((root / "remote").rglob("performance.jsonl")))
+                self.assertEqual(git("rev-parse", "HEAD"), head)

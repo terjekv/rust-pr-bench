@@ -129,6 +129,9 @@ reusable-workflow booleans and numbers use their native YAML types.
 | `cache` | `true` | Enable persistent Cargo and runner caches |
 | `cache_save` | `true` | Allow elected writers to save; false restores only |
 | `cache_namespace` | `default` | Namespace for compatible CI/benchmark caches |
+| `cache_binaries` | `false` | Reuse exact executables across runs for reproducible builds |
+| `binary_cache_key` | empty | Version external build inputs and custom environment |
+| `binary_cache_paths` | `[]` | Additional repository-relative runtime files/directories to bundle |
 | `compile_only` | `false` | Warm head build caches without measurements or lifecycle hooks |
 | `setup_command` | empty | Runtime setup run separately for head and base |
 | `readiness_command` | empty | Readiness probe retried after setup |
@@ -154,7 +157,9 @@ of the workflow implementation.
 Both interfaces cache Cargo downloads, build outputs, and exact-version runner
 installations. The composite action groups compilation by revision and keeps
 measurements isolated. Reports show cache outcomes, timings, and Cargo fresh/rebuilt
-artifact counts.
+artifact counts. Set `cache_binaries: true` to skip compilation and linking on an
+exact executable hit while still measuring both revisions. This opt-in requires
+reproducible builds and declarations for external inputs and extra runtime files.
 
 Use `compile_only: true` in a main-branch workflow to populate caches that later PRs
 can restore. [Cache configuration and diagnostics](docs/caching.md) covers namespace

@@ -138,12 +138,14 @@ class Cache:
         dependencies: str,
         *,
         writer: bool = True,
+        exact_only: bool = False,
     ):
         namespace = digest(os.environ.get("RUST_PR_BENCH_CACHE_NAMESPACE", "default"))
         self.prefix = f"rust-pr-bench-v1-{namespace}-{kind}-{compatibility}-"
         self.key = self.prefix + dependencies
         self.paths = paths
         self.writer = writer
+        self.exact_only = exact_only
         self.record: dict[str, Any] = {
             "kind": kind,
             "key": self.key,
@@ -170,7 +172,7 @@ class Cache:
                             "operation": operation,
                             "key": self.key,
                             "paths": [str(p) for p in self.paths],
-                            "restore_keys": [self.prefix],
+                            "restore_keys": [] if self.exact_only else [self.prefix],
                         }
                     )
                 )
@@ -195,7 +197,13 @@ class Cache:
                 print(completed.stdout, end="", flush=True)
                 payload = json.loads(result.read_text())
                 if f"Failed to {operation}:" in completed.stdout:
-                    payload["status"] = "error"
+                    payload["status"] = (
+                        "contended"
+                        if operation == "save"
+                        and "Unable to reserve cache" in completed.stdout
+                        and "another job may be creating this cache" in completed.stdout
+                        else "error"
+                    )
                 size = re.search(r"Cache Size: ~\d+ MB \((\d+) B\)", completed.stdout)
                 if size:
                     self.record["archive_bytes"] = int(size[1])

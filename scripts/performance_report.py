@@ -39,10 +39,16 @@ def render(directory: pathlib.Path) -> str:
         size_text = f"{size / 1048576:.1f} MiB" if size is not None else "—"
         compile_seconds = item.get("compile_seconds")
         compile_text = f"{compile_seconds:.2f}s" if compile_seconds is not None else "—"
+        if item.get("executables_reused"):
+            compile_text = f"skipped ({item['executables_reused']} executables reused)"
+        restore_time = (
+            f"{item['restore_seconds']:.2f}s" if "restore_seconds" in item else "—"
+        )
+        save_time = f"{item['save_seconds']:.2f}s" if "save_seconds" in item else "—"
         rows.append(
             f"| {name} | {item.get('restore', '—')} / {item.get('save', '—')} | "
-            f"{item.get('restore_seconds', 0):.2f}s / {item.get('save_seconds', 0):.2f}s | "
-            f"{size_text} | {compile_text} | {item.get('fresh', 0)} / {item.get('rebuilt', 0)} |"
+            f"{restore_time} / {save_time} | "
+            f"{size_text} | {compile_text} | {item.get('fresh', '—')} / {item.get('rebuilt', '—')} |"
         )
     for item in records:
         if item.get("kind") == "jobs":
@@ -61,6 +67,7 @@ def render(directory: pathlib.Path) -> str:
             "",
             "Sizes are uncompressed cache contents. Times are observed work, not time saved.",
             "Fresh/rebuilt counts are Cargo compiler artifacts, not benchmark measurements.",
+            "Executable reuse skips compilation; benchmark measurements still run fresh. Contended saves mean another job reserved the same entry.",
             "Cache keys, matched keys, save outcomes and available compressed sizes are in performance.jsonl.",
             "</details>\n",
         ]

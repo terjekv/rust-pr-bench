@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: write
 
 jobs:
   cold:
@@ -65,4 +66,144 @@ jobs:
           assert build["restore"] == "exact", build
           assert build["save"] == "read-only", build
           assert sum(item.get("fresh", 0) for item in records) > 0, records
+          PY
+
+  executables-cold:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./
+        id: bench
+        with:
+          backend: all
+          working_directory: examples/sample-rust-app
+          benchmarks_json: '["sample_callgrind_bench", "sample_criterion_bench"]'
+          compile_only: "true"
+          cache_binaries: "true"
+          cache_namespace: executables-self-test-${{ github.run_id }}-${{ github.run_attempt }}
+          comment_mode: never
+      - name: Check executable save
+        env:
+          PERFORMANCE_PATH: ${{ steps.bench.outputs.performance_path }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          records = json.load(open(os.environ["PERFORMANCE_PATH"]))
+          print(json.dumps(records, indent=2))
+          bundles = [r for r in records if r.get("kind") == "executables"]
+          assert len(bundles) == 1, records
+          assert bundles[0]["restore"] == "miss", bundles
+          assert bundles[0]["save"] == "saved", bundles
+          PY
+
+  executables-warm:
+    needs: executables-cold
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./
+        id: bench
+        with:
+          backend: all
+          working_directory: examples/sample-rust-app
+          benchmarks_json: '["sample_callgrind_bench", "sample_criterion_bench"]'
+          base_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          cache_binaries: "true"
+          cache_save: "false"
+          cache_namespace: executables-self-test-${{ github.run_id }}-${{ github.run_attempt }}
+          criterion_cli_args: "--noplot --sample-size 20 --measurement-time 1"
+          setup_command: |
+            printf 'CACHE_TEST_SIDE=%s\n' "$RUST_PR_BENCH_SIDE" >> "$RUST_PR_BENCH_ENV_FILE"
+          readiness_command: test "$CACHE_TEST_SIDE" = "$RUST_PR_BENCH_SIDE"
+          teardown_command: test "$CACHE_TEST_SIDE" = "$RUST_PR_BENCH_SIDE"
+          comment_mode: never
+      - name: Check executable hits and fresh measurements
+        env:
+          PERFORMANCE_PATH: ${{ steps.bench.outputs.performance_path }}
+          HAD_ERRORS: ${{ steps.bench.outputs.had_errors }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          records = json.load(open(os.environ["PERFORMANCE_PATH"]))
+          print(json.dumps(records, indent=2))
+          bundles = [r for r in records if r.get("kind") == "executables"]
+          assert len(bundles) == 2, records
+          assert all(r["restore"] == "exact" and r["executables_reused"] == 2 for r in bundles), bundles
+          assert not any("compile_seconds" in r or r.get("kind") in ("build", "downloads") for r in records), records
+          assert os.environ["HAD_ERRORS"] == "false"
+          results = list((pathlib.Path(os.environ["PERFORMANCE_PATH"]).parent / "artifacts").rglob("result.json"))
+          assert len(results) == 2, results
+          for path in results:
+              result = json.loads(path.read_text())
+              assert result["head_total"] > 0 and result["base_total"] > 0, result
+              assert "precompiled/" in result["head_command"] and "precompiled/" in result["base_command"], result
+          PY
+
+  workflow-executables-cold:
+    uses: ./.github/workflows/rust-pr-bench.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      backend: all
+      working_directory: examples/sample-rust-app
+      benchmarks_json: '["sample_callgrind_bench", "sample_criterion_bench"]'
+      compile_only: true
+      cache_binaries: true
+      cache_namespace: workflow-executables-self-test-${{ github.run_id }}-${{ github.run_attempt }}
+      comment_mode: never
+
+  workflow-executables-warm:
+    needs: workflow-executables-cold
+    uses: ./.github/workflows/rust-pr-bench.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      backend: all
+      working_directory: examples/sample-rust-app
+      benchmarks_json: '["sample_callgrind_bench", "sample_criterion_bench"]'
+      base_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+      cache_binaries: true
+      cache_save: false
+      cache_namespace: workflow-executables-self-test-${{ github.run_id }}-${{ github.run_attempt }}
+      criterion_cli_args: "--noplot --sample-size 20 --measurement-time 1"
+      comment_mode: never
+
+  check-workflow-executables:
+    needs: workflow-executables-warm
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: bench-report-all-*
+          path: reports
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          pattern: bench-result-*
+          path: results
+      - name: Check reusable workflow skipped compilation
+        run: |
+          python3 - <<'PY'
+          import json, pathlib
+          records = [json.loads(line) for path in pathlib.Path("reports").rglob("performance.jsonl") for line in path.read_text().splitlines()]
+          print(json.dumps(records, indent=2))
+          bundles = [r for r in records if r.get("kind") == "executables"]
+          assert len(bundles) == 2, records
+          assert all(r["restore"] == "exact" and r["executables_reused"] == 2 for r in bundles), bundles
+          assert not any("compile_seconds" in r or r.get("kind") in ("build", "downloads") for r in records), records
+          summaries = list(pathlib.Path("reports").rglob("summary-*.json"))
+          assert len(summaries) == 2, summaries
+          for path in summaries:
+              assert json.loads(path.read_text())["count"] == 1, path
+          results = list(pathlib.Path("results").rglob("result.json"))
+          assert len(results) == 2, results
+          for path in results:
+              result = json.loads(path.read_text())
+              assert result["head_total"] > 0 and result["base_total"] > 0, result
+              assert "precompiled/" in result["head_command"] and "precompiled/" in result["base_command"], result
           PY

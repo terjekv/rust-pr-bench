@@ -1,3 +1,4 @@
+import json
 import os
 import pathlib
 import subprocess
@@ -110,6 +111,30 @@ class BuildCacheTests(unittest.TestCase):
         ):
             self.assertEqual(entry.operation("restore"), {"status": "error"})
         self.assertIn("restore_seconds", entry.record)
+
+    def test_reservation_conflicts_are_distinct_from_service_errors(self):
+        entry = cache.Cache("executables", [], "schema", "identity", exact_only=True)
+        for message, expected in (
+            (
+                "Failed to save: Unable to reserve cache with key x, another job may be creating this cache.",
+                "contended",
+            ),
+            ("Failed to save: Internal server error", "error"),
+        ):
+
+            def transport(command, **kwargs):
+                request = json.loads(pathlib.Path(command[2]).read_text())
+                self.assertEqual(request["restore_keys"], [])
+                pathlib.Path(command[3]).write_text('{"status": "not-saved"}')
+                return subprocess.CompletedProcess(
+                    command, 0, stdout=message, stderr=""
+                )
+
+            with (
+                self.subTest(expected=expected),
+                mock.patch.object(cache.subprocess, "run", side_effect=transport),
+            ):
+                self.assertEqual(entry.operation("save")["status"], expected)
 
     def test_paths_and_namespace_match_across_interfaces(self):
         with mock.patch.dict(

@@ -72,6 +72,21 @@ on:
         required: false
         type: boolean
         default: true
+      cache_binaries:
+        description: Reuse exact benchmark executables across runs; requires reproducible builds.
+        required: false
+        type: boolean
+        default: false
+      binary_cache_key:
+        description: Additional identity for external build inputs and custom environment.
+        required: false
+        type: string
+        default: ""
+      binary_cache_paths:
+        description: JSON array of additional repository-relative runtime files or directories.
+        required: false
+        type: string
+        default: "[]"
       compile_only:
         description: Compile head benchmarks and warm caches without running measurements.
         required: false
@@ -165,6 +180,9 @@ env:
   RUST_PR_BENCH_CACHE: ${{ inputs.cache }}
   RUST_PR_BENCH_CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
   RUST_PR_BENCH_CACHE_SAVE: ${{ inputs.cache_save }}
+  RUST_PR_BENCH_CACHE_BINARIES: ${{ inputs.cache_binaries }}
+  RUST_PR_BENCH_BINARY_CACHE_KEY: ${{ inputs.binary_cache_key }}
+  RUST_PR_BENCH_BINARY_CACHE_PATHS: ${{ inputs.binary_cache_paths }}
   RUST_PR_BENCH_COMPILE_ONLY: ${{ inputs.compile_only }}
 
 jobs:
@@ -262,6 +280,9 @@ jobs:
               '${{ inputs.auto_discover }}' \
               '${{ inputs.auto_detect_moved_benchmarks }}' \
               '${{ inputs.cargo_args }}' \
+              '${{ inputs.cache_namespace }}' \
+              '${{ inputs.cache_binaries }}' \
+              '${{ inputs.compile_only }}' \
               "$SETUP_COMMAND" \
               "$READINESS_COMMAND" \
               "$TEARDOWN_COMMAND" \
@@ -350,6 +371,7 @@ jobs:
         with:
           name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.group_id }}-${{ matrix.side }}
           path: precompiled
+          include-hidden-files: true
 
   benchmark:
     runs-on: ubuntu-latest

@@ -24,6 +24,12 @@ from build_cache import (
     config_paths,
     digest,
     download_cache,
+    enabled,
+)
+from executable_cache import (
+    ExecutableCache,
+    case_identity,
+    identity as executable_identity,
 )
 
 LOCAL_DOWNLOADS: dict[str, dict[str, Any]] = {}
@@ -61,13 +67,28 @@ def find_benchmark_executable(output: str, benchmark_name: str) -> pathlib.Path 
 
 def copy_runtime_artifacts(
     output: str, target_dir: pathlib.Path, runtime_dir: pathlib.Path
-) -> None:
+) -> bool:
     paths: set[pathlib.Path] = set()
+    complete = True
     for line in output.splitlines():
         try:
             message = json.loads(line)
         except json.JSONDecodeError:
             continue
+        if message.get("reason") == "build-script-executed" and message.get("out_dir"):
+            directory = pathlib.Path(message["out_dir"])
+            if directory.is_dir() and directory.resolve().is_relative_to(
+                target_dir.resolve()
+            ):
+                destination = runtime_dir / directory.relative_to(target_dir)
+                destination.mkdir(parents=True, exist_ok=True)
+                paths.update(
+                    path
+                    for path in directory.rglob("*")
+                    if not path.is_dir() or path.is_symlink()
+                )
+            else:
+                complete = False
         if message.get("reason") != "compiler-artifact":
             continue
         target = message.get("target", {})
@@ -82,12 +103,19 @@ def copy_runtime_artifacts(
         try:
             relative = source.relative_to(target_dir)
         except ValueError:
+            complete = False
             continue
-        if not source.is_file():
+        if (
+            not source.is_file()
+            or source.is_symlink()
+            or not source.resolve().is_relative_to(target_dir.resolve())
+        ):
+            complete = False
             continue
         destination = runtime_dir / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(source, destination)
+    return complete
 
 
 def cargo_config_paths(
@@ -184,7 +212,9 @@ def precompile_case(
             "precompiled": False,
         }
 
-    copy_runtime_artifacts(completed.stdout, target_dir, output_dir / "_runtime")
+    runtime_complete = copy_runtime_artifacts(
+        completed.stdout, target_dir, output_dir / "_runtime"
+    )
     case_dir = output_dir / str(case["id"])
     case_dir.mkdir(parents=True, exist_ok=True)
     destination = case_dir / "benchmark"
@@ -194,6 +224,7 @@ def precompile_case(
         "id": case["id"],
         "benchmark_name": case["benchmark_name"],
         "precompiled": True,
+        "runtime_complete": runtime_complete,
         **observations,
     }
 
@@ -216,6 +247,7 @@ def compile_group(
 ) -> list[dict[str, Any]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     git_checkout(repo_path, ref)
+    target_dir = target_dir or cache_root(repo_path) / "target"
     native = native_target_cpu_requested(cases, workdir, repo_path)
     if native and not allow_native:
         results = [
@@ -235,6 +267,49 @@ def compile_group(
         compatibility, dependencies = build_identity(
             repo_path, workdir, cases, details=key_components
         )
+        executables = None
+        if enabled("CACHE_BINARIES", "false") and enabled("CACHE"):
+            try:
+                if native:
+                    raise ValueError("target-cpu=native")
+                exact_identity = executable_identity(
+                    repo_path, workdir, target_dir, cases, (compatibility, dependencies)
+                )
+                # Each distinct source revision owns an entry; head owns equal pairs.
+                same_peer = (
+                    bool(peer_ref)
+                    and subprocess.check_output(
+                        ["git", "rev-parse", peer_ref], cwd=repo_path, text=True
+                    ).strip()
+                    == exact_identity["revision"]
+                    and case_identity(peer_cases or cases) == exact_identity["cases"]
+                )
+                executables = ExecutableCache(
+                    repo_path, exact_identity, writer=side == "head" or not same_peer
+                )
+                reused = executables.restore(output_dir)
+                if reused is not None:
+                    append_record(
+                        output_dir,
+                        {
+                            **executables.cache.record,
+                            "label": f"{group_id}/{side} executables",
+                        },
+                    )
+                    (output_dir / "manifest.json").write_text(
+                        json.dumps(reused, indent=2)
+                    )
+                    return reused
+            except (OSError, ValueError, subprocess.CalledProcessError) as error:
+                append_record(
+                    output_dir,
+                    {
+                        "kind": "executables",
+                        "restore": "ineligible",
+                        "reason": str(error),
+                        "label": f"{group_id}/{side} executables",
+                    },
+                )
         writer = side == "head"
         peer = peer_identity
         if side == "base" and peer_identity is not None:
@@ -260,7 +335,6 @@ def compile_group(
                 restore="local",
                 matched_key=LOCAL_DOWNLOADS[downloads.key].get("matched_key", ""),
             )
-        target_dir = target_dir or cache_root(repo_path) / "target"
         target_dir.mkdir(parents=True, exist_ok=True)
         build = Cache(
             "build",
@@ -306,6 +380,26 @@ def compile_group(
         (output_dir / "build.json").write_text(
             json.dumps({"target_dir": str(target_dir)})
         )
+        if executables is not None:
+            try:
+                after = executable_identity(
+                    repo_path,
+                    workdir,
+                    target_dir,
+                    cases,
+                    build_identity(repo_path, workdir, cases),
+                )
+                if after != executables.identity:
+                    raise ValueError("build-inputs-changed")
+                executables.save(output_dir, results)
+            except (OSError, ValueError, subprocess.CalledProcessError) as error:
+                executables.cache.record.update(
+                    save="inputs-changed", reason=str(error)
+                )
+            append_record(
+                output_dir,
+                {**executables.cache.record, "label": f"{group_id}/{side} executables"},
+            )
     (output_dir / "manifest.json").write_text(json.dumps(results, indent=2))
     return results
 

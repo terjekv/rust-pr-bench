@@ -2,7 +2,8 @@
 
 Both interfaces cache Cargo downloads, Cargo build outputs, and exact-version
 Gungraun/IAI runner installations by default. Cargo still runs after a cache
-restore and decides which artifacts are fresh. Every benchmark measurement,
+restore and decides which artifacts are fresh, unless opt-in executable reuse
+finds a verified exact match. Every benchmark measurement,
 including base measurements, runs again. The project's build profile, LTO,
 optimization settings and compiler flags are preserved.
 
@@ -11,6 +12,9 @@ optimization settings and compiler flags are preserved.
 | `cache` | `true` | Restore and, when permitted, save persistent caches. |
 | `cache_save` | `true` | Allow elected writers to save. Set `false` for restore-only CI. |
 | `cache_namespace` | `default` | Partition caches, or share compatible entries with other jobs in this repository. |
+| `cache_binaries` | `false` | Reuse exact executables across runs; requires reproducible builds. |
+| `binary_cache_key` | empty | Additional identity for external build inputs and custom environment. |
+| `binary_cache_paths` | `[]` | JSON array of repository-relative runtime files/directories to bundle. |
 | `compile_only` | `false` | Build the head revision without running benchmarks or lifecycle hooks. A base revision is unnecessary. |
 
 The composite action also exposes `performance_path`, a JSON file containing its
@@ -147,7 +151,82 @@ time. Cache transfer can outweigh compilation savings for small projects.
 `Cache Self-Test` exercises a cold save and a restore in a separate job;
 the repository's main workflow warms the sample project's benchmark cache.
 
-Complete executable reuse across runs remains a separate optimization: a Cargo
-target cache is **not** used to bypass Cargo or execute an unchecked historical
-baseline. That would require a source/build identity and a complete runtime-file
-manifest, including project-specific generated assets and external inputs.
+## Reuse complete executables
+
+Set `cache_binaries: true` in **both** the warming build and the comparison:
+
+```yaml
+with:
+  cache_namespace: ci-bench
+  cache_binaries: true
+  # Version inputs that the action cannot discover automatically:
+  binary_cache_key: native-libraries-v3
+  # Optional generated assets outside Cargo's target directory:
+  binary_cache_paths: '["generated/benchmark-data"]'
+```
+
+On an exact hit, the precompile step restores a bundle, verifies it, and skips
+Cargo and linking entirely. It also skips Cargo download/target-cache transfers.
+The reusable workflow still distributes executables through its normal artifacts.
+Both revisions run fresh measurements, including setup/readiness/teardown hooks.
+`compile_only` continues to skip measurements and hooks intentionally.
+
+The executable identity includes the checked-out commit, tracked source contents,
+tags, dependency/build identity, full compile commands and selected benchmark cases,
+Cargo version, Rust sysroot, source/target/Cargo-home paths, runner-dispatch paths,
+bundle implementation, declared runtime paths, and `binary_cache_key`. Build
+identity already covers resolved rustc, OS/architecture, runner image, features,
+profiles, compiler flags and Cargo configuration. There are no restore prefixes;
+even a partial match of the primary key is rejected. Base and head use the same
+key for the same source/build identity, so an unchanged baseline can reuse a
+previous head build. Distinct revisions own distinct entries; head owns equal
+base/head pairs. `cache` and `cache_save` apply to executable caches too.
+
+A bundle contains benchmark executables, Cargo-reported helper binaries and shared
+libraries, complete build-script `OUT_DIR` trees, and declared runtime assets.
+Each file has a relative path, size, SHA-256 checksum and executable-bit marker.
+The complete file set and identity are checked after restore and again before
+execution, including after artifact distribution. Empty directories and execute
+bits are restored when artifact transport drops them. Missing, changed, unexpected,
+unsafe or unsupported files reject the bundle and fall back to compilation.
+Cache checksums detect incomplete/corrupt bundles; they do not replace GitHub's
+cache access controls or attest to the publisher's trustworthiness.
+
+The composite action uses a stable private worktree inside the namespace's cache
+directory so embedded `CARGO_MANIFEST_DIR`, `OUT_DIR` and helper paths remain valid.
+It removes the worktree after execution and protects it against simultaneous use
+on the same runner. Use distinct namespaces for concurrent actions on one runner.
+The reusable workflow already has a stable checkout path. Different checkout
+layouts, runner images or toolchain paths deliberately produce different executable
+keys; sharing dependency caches does not guarantee sharing executable bundles.
+
+This option assumes reproducible compilation. Build scripts, proc macros and native
+tools can read arbitrary files, environment variables, system libraries, clocks,
+or network data. The action cannot infer all of those inputs. Include their
+versions/content hashes in `binary_cache_key`, including custom compile-time
+variables and self-hosted runner images/tool installations. If a build intentionally
+embeds a timestamp or random value that must change every run, leave executable
+reuse disabled. Changing runtime-only measurement settings does not require a
+new executable key.
+
+`binary_cache_paths` entries are relative to the repository root (not
+`working_directory`). They must exist after compilation, before lifecycle setup;
+they may name regular files or directories, without globbing. They are restored
+to the same source paths separately before each side's setup hook. Include only
+runtime assets: never secrets, measurement output, or mutable service state.
+Cargo's generated `OUT_DIR` files are bundled automatically. See the
+[Cargo build-script contract](https://doc.rust-lang.org/cargo/reference/build-scripts.html#outputs-of-the-build-script).
+
+A committed lockfile and clean tracked sources are required. Submodules, external
+path dependencies/source symlinks, Cargo path overrides, native CPU builds and
+unsupported runtime links/files disable reuse. Missing declared assets prevent a
+save. Inputs are checked again after compilation; a changed lockfile or generated
+tracked source is never published under the earlier identity. Projects with these
+constraints retain the ordinary compilation path and dependency caches.
+
+The report labels successful hits `skipped (N executables reused)` and records
+`rejected` or `ineligible` outcomes with reasons in `performance.jsonl`. Old build
+timings and benchmark results are never replayed from a bundle. A `contended` save
+means another job reserved the entry; `error` denotes another cache-service failure.
+The executable self-tests cover cold/warm jobs through both public interfaces,
+including fresh Gungraun and Criterion measurements after compilation is skipped.
