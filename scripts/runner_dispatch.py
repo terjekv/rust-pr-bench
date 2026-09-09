@@ -129,13 +129,14 @@ def install_runner(package: str, version: str, cache_dir: pathlib.Path) -> pathl
 
     started = time.monotonic()
     configs = [path.read_text() for path in config_paths(pathlib.Path.cwd()) if path.is_file()]
+    flags = {name: value for name, value in os.environ.items() if name.endswith("RUSTFLAGS")}
     cache = Cache("runner", [version_dir],
                   digest([platform.system(), platform.machine(), os.environ.get("ImageOS", ""),
                           os.environ.get("ImageVersion", ""), runner, version,
-                          os.environ.get("RUSTFLAGS", ""), os.environ.get("CARGO_ENCODED_RUSTFLAGS", ""), configs]),
+                          flags, configs]),
                   version, writer=enabled("CACHE_RUNNER_WRITER"))
     # A runner installed from source can also inherit native CPU flags.
-    native = "native" in (os.environ.get("RUSTFLAGS", "") + os.environ.get("CARGO_ENCODED_RUSTFLAGS", "") + "".join(configs))
+    native = "native" in "".join([*flags.values(), *configs])
     if not native:
         cache.restore()
         if cache.record["restore"] == "error" and version_dir.exists():

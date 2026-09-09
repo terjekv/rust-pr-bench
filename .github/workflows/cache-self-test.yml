@@ -30,6 +30,7 @@ jobs:
           python3 - <<'PY'
           import json, os
           records = json.load(open(os.environ["PERFORMANCE_PATH"]))
+          print(json.dumps(records, indent=2))
           build = next(item for item in records if item.get("kind") == "build")
           assert build["restore"] == "miss", build
           assert build["save"] == "saved", build
@@ -59,6 +60,7 @@ jobs:
           python3 - <<'PY'
           import json, os
           records = json.load(open(os.environ["PERFORMANCE_PATH"]))
+          print(json.dumps(records, indent=2))
           build = next(item for item in records if item.get("kind") == "build")
           assert build["restore"] == "exact", build
           assert build["save"] == "read-only", build

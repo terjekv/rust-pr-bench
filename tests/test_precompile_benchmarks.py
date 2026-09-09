@@ -170,6 +170,20 @@ class PrecompileBenchmarksTests(unittest.TestCase):
                 )
             )
 
+    def test_native_target_cpu_is_detected_in_target_specific_cargo_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = pathlib.Path(tmp)
+            self.assertTrue(
+                precompile_benchmarks.native_target_cpu_requested(
+                    [],
+                    repo,
+                    repo,
+                    {
+                        "CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS": "-C target-cpu=native"
+                    },
+                )
+            )
+
     def test_native_target_cpu_is_detected_in_cargo_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             repo = pathlib.Path(tmp)

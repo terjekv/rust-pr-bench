@@ -113,7 +113,7 @@ def native_target_cpu_requested(
     values = [str(case.get("compile_command", "")) for case in cases]
     environment = env if env is not None else os.environ
     values.extend(
-        environment.get(name, "") for name in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS")
+        value for name, value in environment.items() if name.endswith("RUSTFLAGS")
     )
     for config_path in config_paths(workdir):
         try:
