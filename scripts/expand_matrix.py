@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import os
 import pathlib
 import re
 import shlex
@@ -441,6 +442,9 @@ def make_matrix(
                     "move_candidates": bench.get("move_candidates", []),
                 }
             )
+    runner_writer = next((item["id"] for item in include if item["backend"] == "gungraun"), None)
+    for item in include:
+        item["runner_cache_writer"] = item["id"] == runner_writer
     return {"include": include}
 
 
@@ -489,7 +493,9 @@ def uses_native_target_cpu(command: str) -> bool:
     return NATIVE_TARGET_CPU_RE.search(command) is not None
 
 
-def make_build_matrix(matrix: dict[str, list[dict[str, Any]]]) -> dict[str, list[dict[str, Any]]]:
+def make_build_matrix(
+    matrix: dict[str, list[dict[str, Any]]], *, head_only: bool = False
+) -> dict[str, list[dict[str, Any]]]:
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     metadata: dict[tuple[str, str], dict[str, Any]] = {}
     for item in matrix["include"]:
@@ -517,7 +523,13 @@ def make_build_matrix(matrix: dict[str, list[dict[str, Any]]]) -> dict[str, list
 
     include: list[dict[str, Any]] = []
     for key, cases in groups.items():
-        include.append({**metadata[key], "cases": cases})
+        peer_key = (key[0], "base" if key[1] == "head" else "head")
+        if head_only and key[1] == "base":
+            continue
+        include.append({
+            **metadata[key], "cases": cases, "peer_cases": groups.get(peer_key, []),
+            "download_writer": key[0] == next(iter(groups))[0],
+        })
     if not include:
         include.append(
             {
@@ -612,9 +624,12 @@ def main() -> int:
         args.criterion_cli_args,
     )
     pathlib.Path(args.output).write_text(json.dumps(matrix), encoding="utf-8")
+    head_only = os.environ.get("RUST_PR_BENCH_COMPILE_ONLY", "false") == "true"
+    if head_only and any(not case["precompile"] for case in matrix["include"]):
+        raise ValueError("compile_only requires separable, portable cargo bench commands")
     if args.build_output:
         pathlib.Path(args.build_output).write_text(
-            json.dumps(make_build_matrix(matrix)), encoding="utf-8"
+            json.dumps(make_build_matrix(matrix, head_only=head_only)), encoding="utf-8"
         )
     return 0
 

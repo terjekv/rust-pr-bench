@@ -126,6 +126,10 @@ reusable-workflow booleans and numbers use their native YAML types.
 | `working_directory` | `.` | Cargo project or workspace directory |
 | `toolchain` | `stable` | Rust toolchain |
 | `cargo_args` | empty | Extra Cargo arguments |
+| `cache` | `true` | Enable persistent Cargo and runner caches |
+| `cache_save` | `true` | Allow elected writers to save; false restores only |
+| `cache_namespace` | `default` | Namespace for compatible CI/benchmark caches |
+| `compile_only` | `false` | Warm head build caches without measurements or lifecycle hooks |
 | `setup_command` | empty | Runtime setup run separately for head and base |
 | `readiness_command` | empty | Readiness probe retried after setup |
 | `teardown_command` | empty | Cleanup always attempted after each execution |
@@ -144,6 +148,17 @@ reusable-workflow booleans and numbers use their native YAML types.
 The reusable workflow resolves its helper scripts from the exact called-workflow commit. It also
 exposes `action_repository` and `action_ref` overrides for testing a fork or pull-request revision
 of the workflow implementation.
+
+## Build caching
+
+Both interfaces cache Cargo downloads, build outputs, and exact-version runner
+installations. The composite action groups compilation by revision and keeps
+measurements isolated. Reports show cache outcomes, timings, and Cargo fresh/rebuilt
+artifact counts.
+
+Use `compile_only: true` in a main-branch workflow to populate caches that later PRs
+can restore. [Cache configuration and diagnostics](docs/caching.md) covers namespace
+compatibility, writer selection, native CPU tuning, and examples for existing CI.
 
 ## Service lifecycle hooks
 
@@ -215,6 +230,7 @@ The root action additionally exposes:
 
 - `had_errors`: at least one benchmark command failed.
 - `report_path`: absolute path to the generated Markdown report for later workflow steps.
+- `performance_path`: JSON file with cache outcomes, keys and build observations.
 
 ## Benchmark configuration
 
@@ -330,6 +346,11 @@ The original compatibility workflow path does not exist in this repository. Use
 `.github/workflows/rust-pr-bench.yml` or migrate to the root action.
 
 ## Development
+
+The cache transport bundles GitHub's official `@actions/cache` toolkit. After
+changing its source or npm dependencies, run `npm ci --ignore-scripts`, `npm run build`,
+and `npm test`; commit `package-lock.json` and `dist/cache` together. Consumers use
+the checked-in bundle and do not install npm packages.
 
 Run the local tests with:
 

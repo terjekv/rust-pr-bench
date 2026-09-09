@@ -43,8 +43,12 @@ jobs:
           python3 -m py_compile scripts/*.py
           python3 -m unittest discover -s tests -v
 
-      - name: Run JS helper tests
-        run: node --test tests/test_github_pr_comment.js
+      - name: Check bundled cache transport and JS helpers
+        run: |
+          npm ci --ignore-scripts
+          npm run build
+          git diff --exit-code -- dist/cache
+          npm test
 
       - name: Check sample fixture formatting
         run: cargo fmt --all -- --check

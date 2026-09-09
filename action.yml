@@ -39,6 +39,22 @@ inputs:
     description: Extra arguments appended to Cargo benchmark commands.
     required: false
     default: ""
+  cache:
+    description: Enable persistent Cargo and exact-version runner caches.
+    required: false
+    default: "true"
+  cache_namespace:
+    description: Namespace for compatible caller CI and benchmark caches.
+    required: false
+    default: "default"
+  cache_save:
+    description: Allow elected jobs to save cache entries; false restores only.
+    required: false
+    default: "true"
+  compile_only:
+    description: Compile head benchmarks and warm caches without running measurements.
+    required: false
+    default: "false"
   setup_command:
     description: Runtime setup command run separately for each head and base execution.
     required: false
@@ -106,6 +122,9 @@ outputs:
   had_errors:
     description: Whether one or more benchmark commands failed.
     value: ${{ steps.bench.outputs.had_errors }}
+  performance_path:
+    description: JSON file containing cache outcomes and build timings.
+    value: ${{ steps.bench.outputs.performance_path }}
   report_path:
     description: Absolute path to the generated Markdown report.
     value: ${{ steps.bench.outputs.report_path }}
@@ -128,7 +147,7 @@ runs:
         echo "work_dir=$ACTION_WORK_DIR" >> "$GITHUB_OUTPUT"
 
     - name: Load PR history and regression metadata
-      if: github.event_name == 'pull_request'
+      if: github.event_name == 'pull_request' && inputs.compile_only != 'true'
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
       env:
         ACTION_PATH: ${{ github.action_path }}
@@ -181,13 +200,13 @@ runs:
         python-version: "3.11"
 
     - name: Install cargo-binstall
-      if: inputs.backend != 'criterion'
+      if: inputs.backend != 'criterion' && inputs.compile_only != 'true'
       uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
       with:
         tool: cargo-binstall
 
     - name: Ensure Valgrind is available
-      if: inputs.backend != 'criterion'
+      if: inputs.backend != 'criterion' && inputs.compile_only != 'true'
       shell: bash
       run: |
         if ! command -v valgrind >/dev/null 2>&1; then
@@ -205,12 +224,18 @@ runs:
 
     - name: Run benchmarks and render report
       id: bench
-      shell: bash
+      uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
       env:
+        ACTION_PATH: ${{ github.action_path }}
+        ACTION_WORK_DIR: ${{ steps.paths.outputs.work_dir }}
         RUST_PR_BENCH_CANONICAL_BACKEND: gungraun
         IAI_CALLGRIND_RUNNER: ${{ github.action_path }}/scripts/iai-callgrind-runner-dispatch
         GUNGRAUN_RUNNER: ${{ github.action_path }}/scripts/gungraun-runner-dispatch
         RUST_PR_BENCH_RUNNER_CACHE: ${{ runner.temp }}/rust-pr-bench-runners
+        RUST_PR_BENCH_CACHE: ${{ inputs.cache }}
+        RUST_PR_BENCH_CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
+        RUST_PR_BENCH_CACHE_SAVE: ${{ inputs.cache_save }}
+        RUST_PR_BENCH_COMPILE_ONLY: ${{ inputs.compile_only }}
         RUST_PR_BENCH_BACKEND: ${{ inputs.backend }}
         RUST_PR_BENCH_BENCHMARKS_JSON: ${{ inputs.benchmarks_json }}
         RUST_PR_BENCH_AUTO_DISCOVER: ${{ inputs.auto_discover }}
@@ -232,10 +257,12 @@ runs:
         RUST_PR_BENCH_FAIL_ON_REGRESSION: ${{ inputs.fail_on_regression }}
         RUST_PR_BENCH_REGRESSION_OVERRIDE_LABEL: ${{ inputs.regression_override_label }}
         RUST_PR_BENCH_COMMENT_MODE: ${{ inputs.comment_mode }}
-      run: |
-        python3 "$GITHUB_ACTION_PATH/scripts/action_entrypoint.py" \
-          --repository "$GITHUB_WORKSPACE" \
-          --work-dir "${{ steps.paths.outputs.work_dir }}"
+      with:
+        script: |
+          const path = require('path');
+          await exec.exec('python3', [path.join(process.env.ACTION_PATH, 'scripts/action_entrypoint.py'),
+            '--repository', process.env.GITHUB_WORKSPACE, '--work-dir', process.env.ACTION_WORK_DIR],
+            {env: {...process.env, RUST_PR_BENCH_NODE: process.execPath}});
 
     - name: Add benchmark report to job summary
       if: always() && steps.bench.outputs.report_path != ''
@@ -250,6 +277,7 @@ runs:
         always() &&
         github.event_name == 'pull_request' &&
         steps.bench.outputs.report_path != '' &&
+        inputs.compile_only != 'true' &&
         inputs.comment_mode != 'never' &&
         (inputs.comment_mode == 'always' || steps.bench.outputs.has_regressions == 'true')
       uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9

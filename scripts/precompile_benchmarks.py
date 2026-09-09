@@ -7,14 +7,35 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
+import time
 from typing import Any
 
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from build_cache import (
+    Cache,
+    append_record,
+    build_identity,
+    cache_root,
+    config_paths,
+    digest,
+    download_cache,
+)
+
+LOCAL_DOWNLOADS: dict[str, dict[str, Any]] = {}
+LOCAL_BUILDS: dict[str, dict[str, Any]] = {}
 
 NATIVE_TARGET_CPU_RE = re.compile(r"target-cpu\s*=\s*native", re.IGNORECASE)
 
 
 def git_checkout(repo_path: pathlib.Path, ref: str) -> None:
-    subprocess.run(["git", "checkout", "--force", "--quiet", ref], cwd=repo_path, check=True)
+    subprocess.run(
+        ["git", "checkout", "--force", "--quiet", ref], cwd=repo_path, check=True
+    )
 
 
 def find_benchmark_executable(output: str, benchmark_name: str) -> pathlib.Path | None:
@@ -24,7 +45,9 @@ def find_benchmark_executable(output: str, benchmark_name: str) -> pathlib.Path 
             message = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if message.get("reason") != "compiler-artifact" or not message.get("executable"):
+        if message.get("reason") != "compiler-artifact" or not message.get(
+            "executable"
+        ):
             continue
         target = message.get("target", {})
         if "bench" not in target.get("kind", []):
@@ -67,7 +90,9 @@ def copy_runtime_artifacts(
         shutil.copy2(source, destination)
 
 
-def cargo_config_paths(workdir: pathlib.Path, repo_path: pathlib.Path) -> list[pathlib.Path]:
+def cargo_config_paths(
+    workdir: pathlib.Path, repo_path: pathlib.Path
+) -> list[pathlib.Path]:
     paths: list[pathlib.Path] = []
     current = workdir.resolve()
     root = repo_path.resolve()
@@ -88,10 +113,9 @@ def native_target_cpu_requested(
     values = [str(case.get("compile_command", "")) for case in cases]
     environment = env if env is not None else os.environ
     values.extend(
-        environment.get(name, "")
-        for name in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS")
+        environment.get(name, "") for name in ("RUSTFLAGS", "CARGO_ENCODED_RUSTFLAGS")
     )
-    for config_path in cargo_config_paths(workdir, repo_path):
+    for config_path in config_paths(workdir):
         try:
             values.append(config_path.read_text(encoding="utf-8"))
         except OSError:
@@ -104,17 +128,36 @@ def precompile_case(
     workdir: pathlib.Path,
     target_dir: pathlib.Path,
     output_dir: pathlib.Path,
+    label: str = "",
 ) -> dict[str, Any]:
     command = shlex.split(str(case["compile_command"]))
     env = os.environ.copy()
     env["CARGO_TARGET_DIR"] = str(target_dir)
+    started = time.monotonic()
     completed = subprocess.run(
         command,
         cwd=workdir,
         env=env,
         capture_output=True,
         text=True,
+        check=False,
     )
+    observations = {
+        "compile_seconds": round(time.monotonic() - started, 3),
+        "fresh": 0,
+        "rebuilt": 0,
+    }
+    for line in completed.stdout.splitlines():
+        try:
+            artifact = json.loads(line)
+        except ValueError:
+            continue
+        if artifact.get("reason") == "compiler-artifact":
+            observations["fresh" if artifact.get("fresh") else "rebuilt"] += 1
+    append_record(
+        output_dir, {"label": label or case["benchmark_name"], **observations}
+    )
+    (output_dir / f"compile-{case['id']}.log").write_text(completed.stderr)
     if completed.returncode != 0:
         print(
             f"::warning title=Benchmark precompile failed::{case['benchmark_name']} "
@@ -151,36 +194,30 @@ def precompile_case(
         "id": case["id"],
         "benchmark_name": case["benchmark_name"],
         "precompiled": True,
+        **observations,
     }
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--repo-path", required=True)
-    parser.add_argument("--working-directory", default=".")
-    parser.add_argument("--ref", required=True)
-    parser.add_argument("--target-dir", required=True)
-    parser.add_argument("--cases-json", required=True)
-    parser.add_argument("--output", required=True)
-    args = parser.parse_args()
-
-    repo_path = pathlib.Path(args.repo_path).resolve()
-    workdir = (repo_path / args.working_directory).resolve()
-    target_dir = pathlib.Path(args.target_dir).resolve()
-    output_dir = pathlib.Path(args.output).resolve()
+def compile_group(
+    repo_path: pathlib.Path,
+    workdir: pathlib.Path,
+    ref: str,
+    cases: list[dict[str, Any]],
+    output_dir: pathlib.Path,
+    *,
+    group_id: str = "default",
+    side: str = "head",
+    peer_ref: str = "",
+    peer_cases: list[dict[str, Any]] | None = None,
+    peer_identity: tuple[str, str] | None = None,
+    download_writer: bool = True,
+    allow_native: bool = False,
+    target_dir: pathlib.Path | None = None,
+) -> list[dict[str, Any]]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    target_dir.mkdir(parents=True, exist_ok=True)
-
-    cases = json.loads(args.cases_json)
-    if not isinstance(cases, list):
-        raise ValueError("cases-json must be a JSON array")
-
-    git_checkout(repo_path, args.ref)
-    if native_target_cpu_requested(cases, workdir, repo_path):
-        print(
-            "::warning title=Native CPU tuning detected::Benchmark executables will be "
-            "compiled on their execution runners"
-        )
+    git_checkout(repo_path, ref)
+    native = native_target_cpu_requested(cases, workdir, repo_path)
+    if native and not allow_native:
         results = [
             {
                 "id": case["id"],
@@ -190,10 +227,126 @@ def main() -> int:
             }
             for case in cases
         ]
+        append_record(
+            output_dir, {"label": f"{group_id}/{side}", "restore": "native-disabled"}
+        )
     else:
-        results = [precompile_case(case, workdir, target_dir, output_dir) for case in cases]
-    (output_dir / "manifest.json").write_text(json.dumps(results, indent=2), encoding="utf-8")
-    return 0
+        key_components: dict[str, str] = {}
+        compatibility, dependencies = build_identity(
+            repo_path, workdir, cases, details=key_components
+        )
+        writer = side == "head"
+        peer = peer_identity
+        if side == "base" and peer_identity is not None:
+            writer = peer_identity != (compatibility, dependencies)
+        elif side == "base" and peer_ref:
+            try:
+                git_checkout(repo_path, peer_ref)
+                peer = build_identity(repo_path, workdir, peer_cases or cases)
+                writer = peer != (compatibility, dependencies)
+            finally:
+                git_checkout(repo_path, ref)
+        downloads = download_cache(
+            repo_path,
+            dependencies,
+            writer=download_writer
+            and (side == "head" or (peer is not None and dependencies != peer[1])),
+        )
+        if downloads.key not in LOCAL_DOWNLOADS:
+            downloads.restore()
+            LOCAL_DOWNLOADS[downloads.key] = dict(downloads.record)
+        else:
+            downloads.record.update(
+                restore="local",
+                matched_key=LOCAL_DOWNLOADS[downloads.key].get("matched_key", ""),
+            )
+        target_dir = target_dir or cache_root(repo_path) / "target"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        build = Cache(
+            "build",
+            [target_dir],
+            digest([compatibility, group_id]),
+            dependencies,
+            writer=writer,
+        )
+        build.record["key_components"] = key_components
+        if native:
+            build.record["restore"] = "native-disabled"
+        elif build.key in LOCAL_BUILDS:
+            build.record.update(
+                restore="local",
+                matched_key=LOCAL_BUILDS[build.key].get("matched_key", ""),
+            )
+        else:
+            build.restore()
+            LOCAL_BUILDS[build.key] = dict(build.record)
+            if build.record["restore"] == "error":
+                # A partially extracted archive must not be mistaken for a valid build.
+                shutil.rmtree(target_dir)
+                target_dir.mkdir(parents=True)
+        results = [
+            precompile_case(
+                case,
+                workdir,
+                target_dir,
+                output_dir,
+                f"{group_id}/{side} {case['benchmark_name']}",
+            )
+            for case in cases
+        ]
+        success = all(item["precompiled"] for item in results)
+        if not native:
+            build.save(success)
+        downloads.save(success)
+        for entry in (downloads, build):
+            append_record(
+                output_dir,
+                {**entry.record, "label": f"{group_id}/{side} {entry.record['kind']}"},
+            )
+        (output_dir / "build.json").write_text(
+            json.dumps({"target_dir": str(target_dir)})
+        )
+    (output_dir / "manifest.json").write_text(json.dumps(results, indent=2))
+    return results
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo-path", required=True)
+    parser.add_argument("--working-directory", default=".")
+    parser.add_argument("--ref", required=True)
+    parser.add_argument("--target-dir")
+    parser.add_argument("--cases-json", default=os.environ.get("CASES_JSON", "[]"))
+    parser.add_argument(
+        "--peer-cases-json", default=os.environ.get("PEER_CASES_JSON", "[]")
+    )
+    parser.add_argument("--peer-ref", default="")
+    parser.add_argument("--group-id", default="default")
+    parser.add_argument("--side", default="head")
+    parser.add_argument("--download-writer", default="true")
+    parser.add_argument("--require-success", action="store_true")
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+    repository = pathlib.Path(args.repo_path).resolve()
+    cases = json.loads(args.cases_json)
+    if not isinstance(cases, list):
+        raise ValueError("cases-json must be a JSON array")
+    results = compile_group(
+        repository,
+        (repository / args.working_directory).resolve(),
+        args.ref,
+        cases,
+        pathlib.Path(args.output).resolve(),
+        group_id=args.group_id,
+        side=args.side,
+        peer_ref=args.peer_ref,
+        peer_cases=json.loads(args.peer_cases_json),
+        download_writer=args.download_writer == "true",
+        target_dir=pathlib.Path(args.target_dir).resolve() if args.target_dir else None,
+    )
+    return int(
+        args.require_success and not all(item["precompiled"] for item in results)
+    )
 
 
 if __name__ == "__main__":

@@ -1,0 +1,22 @@
+name: Warm benchmark cache
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  warm:
+    uses: ./.github/workflows/rust-pr-bench.yml
+    with:
+      backend: all
+      working_directory: examples/sample-rust-app
+      benchmarks_json: >-
+        [{"bench":"sample_callgrind_bench","backend":"gungraun"},
+         {"bench":"sample_criterion_bench","backend":"criterion"}]
+      compile_only: true
+      comment_mode: never

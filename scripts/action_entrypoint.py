@@ -16,6 +16,11 @@ SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
+from build_cache import build_identity, cache_root
+from expand_matrix import make_build_matrix
+from precompile_benchmarks import compile_group
+from performance_report import collect as collect_performance
+from performance_report import render as render_performance
 from resolve_threshold import resolve_gungraun_threshold
 
 SUPPORTED_BACKENDS = {"gungraun", "criterion", "all"}
@@ -72,6 +77,8 @@ def resolve_revisions(event: dict[str, Any]) -> tuple[str, str, int | None]:
         or str(head.get("sha") or "").strip()
         or os.environ.get("GITHUB_SHA", "").strip()
     )
+    if not base_sha and parse_bool(action_input("compile_only", "false"), "compile_only"):
+        base_sha = head_sha
     if not base_sha:
         raise ValueError(
             "unable to resolve the base revision; pass base_sha when not running on pull_request"
@@ -227,6 +234,12 @@ def run_cases(
             head_sha,
             "--base-sha",
             base_sha,
+            "--head-precompiled",
+            str(work_dir / "precompiled" / case["build_group_id"] / "head" / case["id"]),
+            "--base-precompiled",
+            str(work_dir / "precompiled" / case["build_group_id"] / "base" / case["id"]),
+            "--head-run-args=" + str(case.get("head_run_args", "")),
+            "--base-run-args=" + str(case.get("base_run_args", "")),
             "--output",
             str(case_dir / "result.json"),
         ]
@@ -381,9 +394,43 @@ def main() -> int:
         cases = expand_cases(
             benchmark_repository, work_dir, base_sha, head_sha, backend
         )
-        had_errors = run_cases(
-            benchmark_repository, work_dir, cases, base_sha, head_sha
-        )
+        compile_only = parse_bool(action_input("compile_only", "false"), "compile_only")
+        os.environ["RUST_PR_BENCH_RUNNER_CACHE"] = str(cache_root(source_repository) / "runners")
+        os.environ["RUST_PR_BENCH_PERFORMANCE_DIR"] = str(work_dir / "performance")
+        groups = make_build_matrix({"include": cases}, head_only=compile_only)["include"]
+        build_errors = compile_only and any(not case["precompile"] for case in cases)
+        workdir = (benchmark_repository / action_input("working_directory", ".")).resolve()
+        head_identities = {
+            group["group_id"]: build_identity(benchmark_repository, workdir, group["cases"])
+            for group in groups if group["enabled"] and group["side"] == "head"
+        }
+        for group in sorted(groups, key=lambda item: (item["side"], item["group_id"])):
+            if not group["enabled"]:
+                continue
+            results = compile_group(
+                benchmark_repository, workdir,
+                head_sha if group["side"] == "head" else base_sha,
+                group["cases"], work_dir / "precompiled" / group["group_id"] / group["side"],
+                group_id=group["group_id"], side=group["side"],
+                peer_identity=head_identities.get(group["group_id"]),
+                download_writer=group["download_writer"], allow_native=True,
+            )
+            build_errors |= not all(item["precompiled"] for item in results)
+        if compile_only:
+            report_path = work_dir / "report.md"
+            report_path.write_text(
+                "Cache warming build. No benchmark measurements were run.\n"
+                + render_performance(work_dir)
+            )
+            performance_path = work_dir / "performance.json"
+            performance_path.write_text(json.dumps(collect_performance(work_dir), indent=2))
+            write_action_outputs({
+                "report_path": str(report_path), "performance_path": str(performance_path),
+                "has_regressions": "false", "has_unaccepted_regressions": "false",
+                "had_errors": str(build_errors).lower(), "should_fail": str(build_errors).lower(),
+            })
+            return 0
+        had_errors = run_cases(benchmark_repository, work_dir, cases, base_sha, head_sha)
         run_at = dt.datetime.now(dt.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
         selected_backends = (
             ["gungraun", "criterion"] if backend == "all" else [backend]
@@ -409,6 +456,10 @@ def main() -> int:
             reports[selected] = report
             summaries.append(summary)
         report_path = compose_report(work_dir, reports, run_at, head_sha, pr_number)
+        with report_path.open("a") as handle:
+            handle.write(render_performance(work_dir))
+        performance_path = work_dir / "performance.json"
+        performance_path.write_text(json.dumps(collect_performance(work_dir), indent=2))
         has_regressions = any(bool(item.get("has_regressions")) for item in summaries)
         has_unaccepted = any(
             bool(item.get("has_unaccepted_regressions")) for item in summaries
@@ -420,6 +471,7 @@ def main() -> int:
                 "has_unaccepted_regressions": str(has_unaccepted).lower(),
                 "had_errors": str(had_errors).lower(),
                 "report_path": str(report_path),
+                "performance_path": str(performance_path),
                 "should_fail": str(should_fail).lower(),
             }
         )

@@ -7,6 +7,22 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Persist Cargo downloads, Cargo build outputs, and exact-version runner installations in both
+  interfaces, with namespace, enable/save controls and explicit matrix writer selection.
+- Add compile-only cache warming on main, cache diagnostics, compilation timings and Cargo
+  fresh/rebuilt artifact counts. Include available job and binary-transfer timings in reports.
+- Exercise cold cache saves and restores across jobs in CI.
+
+### Changed
+
+- Compile composite-action benchmark cases together by revision while retaining isolated
+  measurements and activating each side's runtime binaries immediately before execution.
+
+
+## [Unreleased]
+
 ## [1.2.0] - 2026-08-30
 
 ### Added

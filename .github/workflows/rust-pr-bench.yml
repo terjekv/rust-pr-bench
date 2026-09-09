@@ -57,6 +57,26 @@ on:
         required: false
         type: string
         default: ""
+      cache:
+        description: Enable persistent Cargo and exact-version runner caches.
+        required: false
+        type: boolean
+        default: true
+      cache_namespace:
+        description: Namespace for compatible caller CI and benchmark caches.
+        required: false
+        type: string
+        default: default
+      cache_save:
+        description: Allow elected jobs to save cache entries; false restores only.
+        required: false
+        type: boolean
+        default: true
+      compile_only:
+        description: Compile head benchmarks and warm caches without running measurements.
+        required: false
+        type: boolean
+        default: false
       setup_command:
         description: Runtime setup command run separately for each head and base execution.
         required: false
@@ -142,6 +162,10 @@ permissions:
 
 env:
   RUST_PR_BENCH_CANONICAL_BACKEND: gungraun
+  RUST_PR_BENCH_CACHE: ${{ inputs.cache }}
+  RUST_PR_BENCH_CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
+  RUST_PR_BENCH_CACHE_SAVE: ${{ inputs.cache_save }}
+  RUST_PR_BENCH_COMPILE_ONLY: ${{ inputs.compile_only }}
 
 jobs:
   prepare-matrix:
@@ -195,6 +219,9 @@ jobs:
             HEAD_SHA='${{ github.sha }}'
           fi
 
+          if [ '${{ inputs.compile_only }}' = 'true' ]; then
+            BASE_SHA="$HEAD_SHA"
+          fi
           echo "base_sha=$BASE_SHA" >> "$GITHUB_OUTPUT"
           echo "head_sha=$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
@@ -284,21 +311,41 @@ jobs:
           toolchain: ${{ inputs.toolchain }}
 
       - name: Precompile benchmark executables
-        if: matrix.enabled
+        if: matrix.enabled && (!inputs.compile_only || matrix.side == 'head')
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           CASES_JSON: ${{ toJson(matrix.cases) }}
+          PEER_CASES_JSON: ${{ toJson(matrix.peer_cases) }}
           BENCHMARK_REF: ${{ matrix.side == 'head' && needs.prepare-matrix.outputs.head_sha || needs.prepare-matrix.outputs.base_sha }}
+          PEER_REF: ${{ needs.prepare-matrix.outputs.head_sha }}
+          GROUP_ID: ${{ matrix.group_id }}
+          SIDE: ${{ matrix.side }}
+          DOWNLOAD_WRITER: ${{ matrix.download_writer }}
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+        with:
+          script: |
+            const args = ['action-src/scripts/precompile_benchmarks.py', '--repo-path', 'repo',
+              '--working-directory', process.env.WORKING_DIRECTORY, '--ref', process.env.BENCHMARK_REF,
+              '--peer-ref', process.env.PEER_REF, '--group-id', process.env.GROUP_ID,
+              '--side', process.env.SIDE, '--download-writer', process.env.DOWNLOAD_WRITER,
+              '--output', 'precompiled'];
+            if (process.env.RUST_PR_BENCH_COMPILE_ONLY === 'true') args.push('--require-success');
+            await exec.exec('python3', args, {env: {...process.env, RUST_PR_BENCH_NODE: process.execPath}});
+
+      - name: Upload build performance
+        if: always() && matrix.enabled && (!inputs.compile_only || matrix.side == 'head')
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-build-${{ matrix.group_id }}-${{ matrix.side }}
+          path: precompiled/performance.jsonl
+
+      - name: Summarize cache warming
+        if: inputs.compile_only && matrix.enabled && matrix.side == 'head'
         run: |
-          python3 action-src/scripts/precompile_benchmarks.py \
-            --repo-path repo \
-            --working-directory "${{ inputs.working_directory }}" \
-            --ref "$BENCHMARK_REF" \
-            --target-dir "repo/.bench-target/precompile/${{ matrix.group_id }}/${{ matrix.side }}" \
-            --cases-json "$CASES_JSON" \
-            --output precompiled
+          python3 action-src/scripts/performance_report.py --artifacts-dir precompiled --reports "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark executables
-        if: matrix.enabled
+        if: matrix.enabled && !inputs.compile_only
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.group_id }}-${{ matrix.side }}
@@ -308,7 +355,7 @@ jobs:
     runs-on: ubuntu-latest
     if: >-
       always() &&
-      needs.prepare-matrix.result == 'success'
+      needs.prepare-matrix.result == 'success' && !inputs.compile_only
     needs:
       - prepare-matrix
       - precompile
@@ -411,72 +458,21 @@ jobs:
           path: precompiled/base
 
       - name: Run benchmark pair
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
-          ORIGINAL_HEAD_COMMAND: ${{ matrix.head_command }}
-          ORIGINAL_BASE_COMMAND: ${{ matrix.base_command }}
-          HEAD_RUN_ARGS: ${{ matrix.head_run_args }}
-          BASE_RUN_ARGS: ${{ matrix.base_run_args }}
+          CASE_JSON: ${{ toJson(matrix) }}
+          WORKING_DIRECTORY: ${{ inputs.working_directory }}
+          CRITERION_STATISTIC: ${{ inputs.criterion_statistic }}
+          HEAD_SHA: ${{ steps.refs.outputs.head_sha }}
+          BASE_SHA: ${{ steps.refs.outputs.base_sha }}
           SETUP_COMMAND: ${{ inputs.setup_command }}
           READINESS_COMMAND: ${{ inputs.readiness_command }}
           TEARDOWN_COMMAND: ${{ inputs.teardown_command }}
           READINESS_TIMEOUT_SECONDS: ${{ inputs.readiness_timeout_seconds }}
-        run: |
-          mkdir -p artifacts
-          HEAD_COMMAND="$ORIGINAL_HEAD_COMMAND"
-          BASE_COMMAND="$ORIGINAL_BASE_COMMAND"
-          HEAD_BINARY="$GITHUB_WORKSPACE/precompiled/head/${{ matrix.id }}/benchmark"
-          BASE_BINARY="$GITHUB_WORKSPACE/precompiled/base/${{ matrix.id }}/benchmark"
-          HEAD_RUNTIME="$GITHUB_WORKSPACE/precompiled/head/_runtime"
-          BASE_RUNTIME="$GITHUB_WORKSPACE/precompiled/base/_runtime"
-          HEAD_PREBUILD_TARGET="$GITHUB_WORKSPACE/repo/.bench-target/precompile/${{ matrix.build_group_id }}/head"
-          BASE_PREBUILD_TARGET="$GITHUB_WORKSPACE/repo/.bench-target/precompile/${{ matrix.build_group_id }}/base"
-          RUST_HOST="$(rustc -vV | sed -n 's/^host: //p')"
-          RUST_SYSROOT="$(rustc --print sysroot)"
-          RUST_LIBRARY_PATH="$RUST_SYSROOT/lib/rustlib/$RUST_HOST/lib"
-          if [ -d "$HEAD_RUNTIME" ]; then
-            mkdir -p "$HEAD_PREBUILD_TARGET"
-            cp -R "$HEAD_RUNTIME"/. "$HEAD_PREBUILD_TARGET"/
-          fi
-          if [ -d "$BASE_RUNTIME" ]; then
-            mkdir -p "$BASE_PREBUILD_TARGET"
-            cp -R "$BASE_RUNTIME"/. "$BASE_PREBUILD_TARGET"/
-          fi
-          if [ -f "$HEAD_BINARY" ]; then
-            chmod +x "$HEAD_BINARY"
-            printf -v HEAD_BINARY_QUOTED '%q' "$HEAD_BINARY"
-            HEAD_LIBRARY_PATH="$HEAD_PREBUILD_TARGET/release/deps:$HEAD_PREBUILD_TARGET/release:$RUST_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            printf -v HEAD_LIBRARY_PATH_QUOTED '%q' "$HEAD_LIBRARY_PATH"
-            HEAD_COMMAND="env LD_LIBRARY_PATH=$HEAD_LIBRARY_PATH_QUOTED $HEAD_BINARY_QUOTED${HEAD_RUN_ARGS:+ $HEAD_RUN_ARGS}"
-          fi
-          if [ -f "$BASE_BINARY" ]; then
-            chmod +x "$BASE_BINARY"
-            printf -v BASE_BINARY_QUOTED '%q' "$BASE_BINARY"
-            BASE_LIBRARY_PATH="$BASE_PREBUILD_TARGET/release/deps:$BASE_PREBUILD_TARGET/release:$RUST_LIBRARY_PATH${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-            printf -v BASE_LIBRARY_PATH_QUOTED '%q' "$BASE_LIBRARY_PATH"
-            BASE_COMMAND="env LD_LIBRARY_PATH=$BASE_LIBRARY_PATH_QUOTED $BASE_BINARY_QUOTED${BASE_RUN_ARGS:+ $BASE_RUN_ARGS}"
-          fi
-          python3 action-src/scripts/run_pair.py \
-            --repo-path repo \
-            --working-directory "${{ inputs.working_directory }}" \
-            --benchmark-name "${{ matrix.benchmark_name }}" \
-            --feature-name "${{ matrix.feature_name }}" \
-            --command "${{ matrix.command }}" \
-            --head-command "$HEAD_COMMAND" \
-            --base-command "$BASE_COMMAND" \
-            ${{ matrix.moved && '--moved' || '' }} \
-            --move-source "${{ matrix.move_source }}" \
-            --move-target "${{ matrix.move_target }}" \
-            ${{ matrix.move_ambiguous && '--move-ambiguous' || '' }} \
-            --move-candidates '${{ toJson(matrix.move_candidates) }}' \
-            --backend "${{ matrix.backend }}" \
-            --criterion-statistic "${{ inputs.criterion_statistic }}" \
-            --setup-command "$SETUP_COMMAND" \
-            --readiness-command "$READINESS_COMMAND" \
-            --teardown-command "$TEARDOWN_COMMAND" \
-            --readiness-timeout-seconds "$READINESS_TIMEOUT_SECONDS" \
-            --head-sha "${{ steps.refs.outputs.head_sha }}" \
-            --base-sha "${{ steps.refs.outputs.base_sha }}" \
-            --output artifacts/result.json
+        with:
+          script: |
+            await exec.exec('python3', ['action-src/scripts/workflow_run_pair.py'],
+              {env: {...process.env, RUST_PR_BENCH_NODE: process.execPath}});
 
       - name: Upload result
         if: always()
@@ -486,13 +482,15 @@ jobs:
           path: |
             artifacts/result.json
             artifacts/*.log
+            artifacts/performance.jsonl
 
   report:
     runs-on: ubuntu-latest
-    if: always() && needs.prepare-matrix.result == 'success'
+    if: always() && needs.prepare-matrix.result == 'success' && !inputs.compile_only
     needs:
       - prepare-matrix
       - benchmark
+      - precompile
     outputs:
       has_regressions: ${{ steps.render_overall.outputs.has_regressions }}
       has_unaccepted_regressions: ${{ steps.render_overall.outputs.has_unaccepted_regressions }}
@@ -737,6 +735,18 @@ jobs:
 
           cat report.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Collect completed job and artifact transfer timings
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
+        with:
+          script: |
+            const helper = require('./action-src/scripts/job_performance');
+            await helper.collect({github, context, core, output: 'artifacts/performance.jsonl'});
+
+      - name: Add build and cache performance to reports
+        run: |
+          python3 action-src/scripts/performance_report.py --artifacts-dir artifacts \
+            --reports report-gungraun.md report-criterion.md report.md "$GITHUB_STEP_SUMMARY"
+
       - name: Compute overall regression flag
         id: render_overall
         run: |
@@ -770,6 +780,7 @@ jobs:
             report*.md
             summary-*.json
             regression-overrides.json
+            artifacts/**/performance.jsonl
 
       - name: Upsert Gungraun PR comment
         continue-on-error: true

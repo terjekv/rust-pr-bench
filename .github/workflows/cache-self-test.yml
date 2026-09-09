@@ -1,0 +1,66 @@
+name: Cache Self-Test
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cold:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./
+        id: bench
+        with:
+          backend: criterion
+          working_directory: examples/sample-rust-app
+          benchmarks_json: '["sample_criterion_bench"]'
+          compile_only: "true"
+          cache_namespace: self-test-${{ github.run_id }}-${{ github.run_attempt }}
+          comment_mode: never
+      - name: Check cold save
+        env:
+          PERFORMANCE_PATH: ${{ steps.bench.outputs.performance_path }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          records = json.load(open(os.environ["PERFORMANCE_PATH"]))
+          build = next(item for item in records if item.get("kind") == "build")
+          assert build["restore"] == "miss", build
+          assert build["save"] == "saved", build
+          PY
+
+  warm:
+    needs: cold
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+      - uses: ./
+        id: bench
+        with:
+          backend: criterion
+          working_directory: examples/sample-rust-app
+          benchmarks_json: '["sample_criterion_bench"]'
+          compile_only: "true"
+          cache_namespace: self-test-${{ github.run_id }}-${{ github.run_attempt }}
+          cache_save: "false"
+          comment_mode: never
+      - name: Check warm restore and fresh dependencies
+        env:
+          PERFORMANCE_PATH: ${{ steps.bench.outputs.performance_path }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          records = json.load(open(os.environ["PERFORMANCE_PATH"]))
+          build = next(item for item in records if item.get("kind") == "build")
+          assert build["restore"] == "exact", build
+          assert build["save"] == "read-only", build
+          assert sum(item.get("fresh", 0) for item in records) > 0, records
+          PY

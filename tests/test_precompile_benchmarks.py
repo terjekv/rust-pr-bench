@@ -2,6 +2,7 @@ import json
 import pathlib
 import tempfile
 import unittest
+from unittest import mock
 
 from testlib import load_script_module
 
@@ -12,6 +13,78 @@ precompile_benchmarks = load_script_module(
 
 
 class PrecompileBenchmarksTests(unittest.TestCase):
+    def test_base_only_writes_a_distinct_build_identity(self) -> None:
+        for peer, expected in (
+            (("compiler", "deps"), False),
+            (("compiler", "other"), True),
+        ):
+            with self.subTest(peer=peer), tempfile.TemporaryDirectory() as tmp:
+                root = pathlib.Path(tmp)
+                precompile_benchmarks.LOCAL_DOWNLOADS.clear()
+                precompile_benchmarks.LOCAL_BUILDS.clear()
+                with (
+                    mock.patch.object(
+                        precompile_benchmarks, "git_checkout"
+                    ) as checkout,
+                    mock.patch.object(
+                        precompile_benchmarks,
+                        "native_target_cpu_requested",
+                        return_value=False,
+                    ),
+                    mock.patch.object(
+                        precompile_benchmarks,
+                        "build_identity",
+                        return_value=("compiler", "deps"),
+                    ),
+                    mock.patch.object(
+                        precompile_benchmarks,
+                        "precompile_case",
+                        return_value={"precompiled": True},
+                    ),
+                    mock.patch.object(
+                        precompile_benchmarks.Cache, "restore", autospec=True
+                    ),
+                    mock.patch.object(
+                        precompile_benchmarks.Cache, "save", autospec=True
+                    ) as save,
+                ):
+                    precompile_benchmarks.compile_group(
+                        root,
+                        root,
+                        "base",
+                        [{"id": "case", "benchmark_name": "bench"}],
+                        root / "output",
+                        side="base",
+                        peer_identity=peer,
+                        target_dir=root / "target",
+                    )
+                    self.assertEqual(save.call_args_list[0].args[0].writer, expected)
+                    checkout.assert_called_once_with(root, "base")
+
+    def test_native_builds_never_restore_portable_target_caches(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp)
+            with (
+                mock.patch.object(precompile_benchmarks, "git_checkout"),
+                mock.patch.object(
+                    precompile_benchmarks,
+                    "native_target_cpu_requested",
+                    return_value=True,
+                ),
+                mock.patch.object(precompile_benchmarks, "build_identity") as identity,
+                mock.patch.object(precompile_benchmarks.Cache, "restore") as restore,
+            ):
+                result = precompile_benchmarks.compile_group(
+                    root,
+                    root,
+                    "head",
+                    [{"id": "case", "benchmark_name": "bench"}],
+                    root / "output",
+                )
+                self.assertEqual(result[0]["reason"], "target-cpu=native")
+                restore.assert_not_called()
+                identity.assert_not_called()
+
     def test_find_benchmark_executable_prefers_named_bench_target(self) -> None:
         messages = [
             {
@@ -40,7 +113,9 @@ class PrecompileBenchmarksTests(unittest.TestCase):
             }
         )
 
-        self.assertIsNone(precompile_benchmarks.find_benchmark_executable(output, "wanted"))
+        self.assertIsNone(
+            precompile_benchmarks.find_benchmark_executable(output, "wanted")
+        )
 
     def test_copy_runtime_artifacts_preserves_target_relative_paths(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -65,10 +140,13 @@ class PrecompileBenchmarksTests(unittest.TestCase):
             precompile_benchmarks.copy_runtime_artifacts(output, target, runtime)
 
             self.assertEqual(
-                (runtime / "release" / "application").read_text(encoding="utf-8"), "binary"
+                (runtime / "release" / "application").read_text(encoding="utf-8"),
+                "binary",
             )
             self.assertEqual(
-                (runtime / "release" / "deps" / "libdynamic.so").read_text(encoding="utf-8"),
+                (runtime / "release" / "deps" / "libdynamic.so").read_text(
+                    encoding="utf-8"
+                ),
                 "library",
             )
 

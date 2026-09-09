@@ -16,6 +16,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from backend_names import GUNGRAUN_BACKEND, normalize_backend  # noqa: E402
+from precompiled_runtime import command_for  # noqa: E402
 
 
 ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -697,6 +698,10 @@ def main() -> int:
     parser.add_argument("--readiness-timeout-seconds", type=float, default=60.0)
     parser.add_argument("--head-sha", required=True)
     parser.add_argument("--base-sha", required=True)
+    parser.add_argument("--head-precompiled", default="")
+    parser.add_argument("--base-precompiled", default="")
+    parser.add_argument("--head-run-args", default="")
+    parser.add_argument("--base-run-args", default="")
     parser.add_argument("--output", required=True)
     args = parser.parse_args()
 
@@ -722,6 +727,10 @@ def main() -> int:
 
     try:
         git_checkout(repo_path, args.head_sha)
+        if args.head_precompiled:
+            head_command = command_for(
+                pathlib.Path(args.head_precompiled), args.head_run_args, head_command
+            )
         head = run_execution(
             head_command,
             workdir,
@@ -739,6 +748,10 @@ def main() -> int:
         )
 
         git_checkout(repo_path, args.base_sha)
+        if args.base_precompiled:
+            base_command = command_for(
+                pathlib.Path(args.base_precompiled), args.base_run_args, base_command
+            )
         base = run_execution(
             base_command,
             workdir,
