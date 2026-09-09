@@ -79,7 +79,7 @@ jobs:
         with:
           backend: all
           working_directory: examples/sample-rust-app
-          benchmarks_json: '["sample_callgrind_bench", "sample_criterion_bench"]'
+          benchmarks_json: '[{"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},{"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}]'
           compile_only: "true"
           cache_binaries: "true"
           cache_namespace: executables-self-test-${{ github.run_id }}-${{ github.run_attempt }}
@@ -110,7 +110,7 @@ jobs:
         with:
           backend: all
           working_directory: examples/sample-rust-app
-          benchmarks_json: '["sample_callgrind_bench", "sample_criterion_bench"]'
+          benchmarks_json: '[{"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},{"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}]'
           base_sha: ${{ github.event.pull_request.head.sha || github.sha }}
           cache_binaries: "true"
           cache_save: "false"
@@ -151,7 +151,7 @@ jobs:
     with:
       backend: all
       working_directory: examples/sample-rust-app
-      benchmarks_json: '["sample_callgrind_bench", "sample_criterion_bench"]'
+      benchmarks_json: '[{"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},{"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}]'
       compile_only: true
       cache_binaries: true
       cache_namespace: workflow-executables-self-test-${{ github.run_id }}-${{ github.run_attempt }}
@@ -166,7 +166,7 @@ jobs:
     with:
       backend: all
       working_directory: examples/sample-rust-app
-      benchmarks_json: '["sample_callgrind_bench", "sample_criterion_bench"]'
+      benchmarks_json: '[{"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},{"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}]'
       base_sha: ${{ github.event.pull_request.head.sha || github.sha }}
       cache_binaries: true
       cache_save: false
