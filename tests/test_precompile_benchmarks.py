@@ -1,5 +1,6 @@
 import json
 import pathlib
+import subprocess
 import tempfile
 import unittest
 from unittest import mock
@@ -13,6 +14,47 @@ precompile_benchmarks = load_script_module(
 
 
 class PrecompileBenchmarksTests(unittest.TestCase):
+    def test_missing_runtime_file_leaves_no_executable_for_the_measurement_job(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary).resolve()
+            target = root / "target"
+            target.mkdir()
+            binary = target / "bench"
+            binary.write_text("benchmark")
+            output = root / "output"
+            output.mkdir()
+            messages = [
+                {
+                    "reason": "compiler-artifact",
+                    "target": {"name": "bench", "kind": ["bench"]},
+                    "executable": str(binary),
+                },
+                {
+                    "reason": "compiler-artifact",
+                    "target": {"kind": ["bin"]},
+                    "executable": str(target / "missing-helper"),
+                },
+            ]
+            completed = subprocess.CompletedProcess(
+                [], 0, stdout="\n".join(json.dumps(m) for m in messages), stderr=""
+            )
+            with mock.patch.object(
+                precompile_benchmarks.subprocess, "run", return_value=completed
+            ):
+                result = precompile_benchmarks.precompile_case(
+                    {
+                        "id": "case",
+                        "benchmark_name": "bench",
+                        "compile_command": "cargo bench --no-run",
+                    },
+                    root,
+                    target,
+                    output,
+                )
+            self.assertFalse(result["precompiled"])
+            self.assertEqual(result["reason"], "runtime-files-incomplete")
+            self.assertFalse((output / "case/benchmark").exists())
+
     def test_base_only_writes_a_distinct_build_identity(self) -> None:
         for peer, expected in (
             (("compiler", "deps"), False),

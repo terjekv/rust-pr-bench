@@ -227,6 +227,18 @@ def precompile_case(
     runtime_complete = copy_runtime_artifacts(
         completed.stdout, target_dir, output_dir / "_runtime"
     )
+    if not runtime_complete:
+        print(
+            f"::warning title=Incomplete benchmark runtime::{case['benchmark_name']} "
+            "will compile in its benchmark job"
+        )
+        return {
+            "id": case["id"],
+            "benchmark_name": case["benchmark_name"],
+            "precompiled": False,
+            "runtime_complete": False,
+            "reason": "runtime-files-incomplete",
+        }
     case_dir = output_dir / str(case["id"])
     case_dir.mkdir(parents=True, exist_ok=True)
     destination = case_dir / "benchmark"
