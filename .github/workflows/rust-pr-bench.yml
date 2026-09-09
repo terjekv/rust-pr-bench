@@ -437,7 +437,7 @@ jobs:
 
       - name: Install cargo-binstall for exact-version runner dispatch
         if: ${{ matrix.backend == 'gungraun' }}
-        uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+        uses: taiki-e/install-action@84f5ac3124727fb3d284d4d22ee9ab3654fd09a6 # v2
         with:
           tool: cargo-binstall
 
