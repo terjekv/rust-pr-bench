@@ -2,11 +2,20 @@
 import argparse
 import os
 import pathlib
+import platform
+import time
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
+
+
+SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from build_cache import Cache, append_record, config_paths, digest, enabled
 
 
 PACKAGE_RUNNERS = {
@@ -118,6 +127,28 @@ def install_runner(package: str, version: str, cache_dir: pathlib.Path) -> pathl
     if runner_path.is_file() and os.access(runner_path, os.X_OK):
         return runner_path
 
+    started = time.monotonic()
+    configs = [path.read_text() for path in config_paths(pathlib.Path.cwd()) if path.is_file()]
+    flags = {name: value for name, value in os.environ.items() if name.endswith("RUSTFLAGS")}
+    cache = Cache("runner", [version_dir],
+                  digest([platform.system(), platform.machine(), os.environ.get("ImageOS", ""),
+                          os.environ.get("ImageVersion", ""), runner, version,
+                          flags, configs]),
+                  version, writer=enabled("CACHE_RUNNER_WRITER"))
+    # A runner installed from source can also inherit native CPU flags.
+    native = "native" in "".join([*flags.values(), *configs])
+    if not native:
+        cache.restore()
+        if cache.record["restore"] == "error" and version_dir.exists():
+            shutil.rmtree(version_dir)
+    def report() -> None:
+        directory = os.environ.get("RUST_PR_BENCH_PERFORMANCE_DIR")
+        if directory:
+            append_record(pathlib.Path(directory), {**cache.record, "label": f"{runner} {version}",
+                                                    "installation_seconds": time.monotonic() - started})
+    if runner_path.is_file() and os.access(runner_path, os.X_OK):
+        report()
+        return runner_path
     version_dir.parent.mkdir(parents=True, exist_ok=True)
     failures: list[str] = []
     with tempfile.TemporaryDirectory(
@@ -142,6 +173,9 @@ def install_runner(package: str, version: str, cache_dir: pathlib.Path) -> pathl
                 if version_dir.exists():
                     shutil.rmtree(version_dir)
                 os.replace(install_root, version_dir)
+                if not native:
+                    cache.save()
+                report()
                 return runner_path
             failures.append(f"{installer_name} exited with status {completed.returncode}")
 

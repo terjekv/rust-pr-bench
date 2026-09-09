@@ -4,3 +4,5 @@ examples/sample-rust-app/target/
 __pycache__/
 *.pyc
 .ruff_cache/
+node_modules/
+.rust-pr-bench-cache/

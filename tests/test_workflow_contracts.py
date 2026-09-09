@@ -102,7 +102,7 @@ class WorkflowContractTests(unittest.TestCase):
             "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
             benchmark,
         )
-        self.assertIn("scripts/run_pair.py", benchmark)
+        self.assertIn("scripts/workflow_run_pair.py", benchmark)
 
     def test_public_interfaces_wire_isolated_runtime_lifecycle_hooks(self) -> None:
         metadata = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
@@ -123,10 +123,10 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("RUST_PR_BENCH_SETUP_COMMAND", metadata)
         self.assertIn("RUST_PR_BENCH_READINESS_COMMAND", metadata)
         self.assertIn("RUST_PR_BENCH_TEARDOWN_COMMAND", metadata)
-        self.assertIn('--setup-command "$SETUP_COMMAND"', benchmark)
-        self.assertIn('--readiness-command "$READINESS_COMMAND"', benchmark)
-        self.assertIn('--teardown-command "$TEARDOWN_COMMAND"', benchmark)
-        self.assertIn('--readiness-timeout-seconds "$READINESS_TIMEOUT_SECONDS"', benchmark)
+        entrypoint = (REPO_ROOT / "scripts/workflow_run_pair.py").read_text()
+        for name in ("setup-command", "readiness-command", "teardown-command", "readiness-timeout-seconds"):
+            self.assertIn(name, entrypoint)
+            self.assertIn(name.upper().replace("-", "_"), benchmark)
         self.assertIn("artifacts/*.log", benchmark)
 
     def test_workflow_keeps_old_runner_binary_interoperability(self) -> None:
