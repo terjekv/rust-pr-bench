@@ -213,7 +213,7 @@ runs:
 
     - name: Install cargo-binstall
       if: inputs.backend != 'criterion' && inputs.compile_only != 'true'
-      uses: taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833 # v2
+      uses: taiki-e/install-action@fa23953489c080190314742a9b907f8e97c6767c # v2
       with:
         tool: cargo-binstall
 
