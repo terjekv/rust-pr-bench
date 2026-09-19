@@ -137,7 +137,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("scripts/iai-callgrind-runner-dispatch", workflow)
         self.assertIn("scripts/gungraun-runner-dispatch", workflow)
         self.assertIn(
-            "taiki-e/install-action@742a3317eac7bd62f91cd888b4eead5e784ba833",
+            "taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3",
             workflow,
         )
 
@@ -210,7 +210,7 @@ class WorkflowContractTests(unittest.TestCase):
         for postgres_job in (action_postgres, workflow_postgres):
             self.assertRegex(
                 postgres_job,
-                r"postgres:16\.14-alpine3\.24@sha256:[0-9a-f]{64}",
+                r"postgres:18\.6-alpine3\.24@sha256:[0-9a-f]{64}",
             )
             self.assertIn("/proc/1/comm", postgres_job)
             self.assertIn("pg_isready", postgres_job)
