@@ -175,7 +175,7 @@ setup_command: |
   NAME="bench-postgres-${RUST_PR_BENCH_EXECUTION_ID}"
   docker run --detach --name "$NAME" --publish-all \
     --env POSTGRES_PASSWORD=bench \
-    postgres:16.14-alpine3.24@sha256:57c72fd2a128e416c7fcc499958864df5301e940bca0a56f58fddf30ffc07777
+    postgres:18.6-alpine3.24@sha256:6c538e7206ea40ff740ef27883529390a690b6ead6ba96b44c67a9f7c638e8fd
   PORT="$(docker port "$NAME" 5432/tcp | sed 's/.*://')"
   printf 'PG_CONTAINER=%s\n' "$NAME" >> "$RUST_PR_BENCH_ENV_FILE"
   printf 'DATABASE_URL=postgres://postgres:bench@127.0.0.1:%s/postgres\n' "$PORT" \
