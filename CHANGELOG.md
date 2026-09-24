@@ -7,6 +7,12 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Allow reusable-workflow callers to select a runner image with `runs_on`. Compilation and
+  execution use the same image; the default remains `ubuntu-latest`. This lets callers select
+  a newer profiler when the default image cannot read symbols in their Rust executables.
+
 ## [1.3.0] - 2026-09-10
 
 ### Added

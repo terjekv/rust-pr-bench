@@ -3,6 +3,11 @@ name: Rust PR Bench
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: Runner label used for preparation, compilation, measurements, and reporting.
+        required: false
+        type: string
+        default: ubuntu-latest
       backend:
         description: Benchmark backend to use (gungraun, criterion, or all).
         required: false
@@ -187,7 +192,7 @@ env:
 
 jobs:
   prepare-matrix:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
@@ -299,7 +304,7 @@ jobs:
           echo "binary_value=bench-binary-${HASH}" >> "$GITHUB_OUTPUT"
 
   precompile:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     needs: prepare-matrix
     env:
       IAI_CALLGRIND_RUNNER: ${{ github.workspace }}/action-src/scripts/iai-callgrind-runner-dispatch
@@ -374,7 +379,7 @@ jobs:
           include-hidden-files: true
 
   benchmark:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     if: >-
       always() &&
       needs.prepare-matrix.result == 'success' && !inputs.compile_only
@@ -507,7 +512,7 @@ jobs:
             artifacts/performance.jsonl
 
   report:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     if: always() && needs.prepare-matrix.result == 'success' && !inputs.compile_only
     needs:
       - prepare-matrix

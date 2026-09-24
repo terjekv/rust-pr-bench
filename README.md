@@ -111,6 +111,12 @@ jobs:
 - Exposes raw and unaccepted regression signals separately.
 - Supports label-approved, auditable exceptions for intentional regressions.
 
+The reusable workflow also accepts `runs_on` (default: `ubuntu-latest`). Set, for example,
+`runs_on: ubuntu-26.04` to choose the OS image for every workflow job, including both
+compilation and measurements. This keeps precompiled executables compatible with the
+measurement runners and permits selecting a newer Valgrind when an older image cannot
+load a Rust executable's symbols. The composite action uses its caller's runner instead.
+
 ## Inputs
 
 The action and reusable workflow share the inputs below. As noted above, action values are strings;

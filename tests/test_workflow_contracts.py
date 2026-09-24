@@ -30,6 +30,22 @@ def extract_job_block(workflow_text: str, job_name: str) -> str:
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_runner_label_defaults_to_ubuntu_latest(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text()
+        self.assertRegex(
+            workflow,
+            r"runs_on:\n(?:        .*\n)*        default: ubuntu-latest",
+        )
+
+    def test_all_jobs_use_the_selected_runner_label(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text()
+        for name in ["prepare-matrix", "precompile", "benchmark", "report"]:
+            with self.subTest(job=name):
+                self.assertIn(
+                    "    runs-on: ${{ inputs.runs_on }}",
+                    extract_job_block(workflow, name),
+                )
+
     def test_root_metadata_defines_the_marketplace_action(self) -> None:
         metadata = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
 
