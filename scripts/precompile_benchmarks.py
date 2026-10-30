@@ -383,14 +383,23 @@ def compile_group(
                 matched_key=LOCAL_DOWNLOADS[downloads.key].get("matched_key", ""),
             )
         target_dir.mkdir(parents=True, exist_ok=True)
+        build_compatibility, build_dependencies = compatibility, dependencies
+        build_components = key_components
+        if cache_cases and case_identity(cache_cases) != case_identity(cases):
+            # Cargo validates restored outputs. Use the full compatible catalog's
+            # dependency cache even when a subset omits other workspace manifests.
+            build_components = {}
+            build_compatibility, build_dependencies = build_identity(
+                repo_path, workdir, cache_cases, details=build_components
+            )
         build = Cache(
             "build",
             [target_dir],
-            digest([compatibility, group_id]),
-            dependencies,
+            digest([build_compatibility, group_id]),
+            build_dependencies,
             writer=writer,
         )
-        build.record["key_components"] = key_components
+        build.record["key_components"] = build_components
         if native:
             build.record["restore"] = "native-disabled"
         elif build.key in LOCAL_BUILDS:
