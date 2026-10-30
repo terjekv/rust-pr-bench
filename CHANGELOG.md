@@ -7,6 +7,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+### Added
+
+- Add caller-defined target tags and execution profiles to both interfaces, with
+  target/tag selection before compilation and retained selection evidence.
+- Reuse executable bundles when selected targets are a verified subset of an exact
+  warmed catalog, keeping measurements fresh and profile histories separate.
+- Add independent build/executable cache-write controls and versioned operation IDs.
+- Report setup, readiness, benchmark-command, and teardown execution durations.
+
+### Fixed
+
+- Mark lane timing snapshots provisional and distinguish elapsed spans, aggregate
+  runner work, artifact transfers, and unavailable queue measurements accurately.
+
 ## [1.3.0] - 2026-09-10
 
 ### Added

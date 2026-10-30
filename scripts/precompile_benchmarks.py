@@ -268,6 +268,7 @@ def compile_group(
     download_writer: bool = True,
     allow_native: bool = False,
     target_dir: pathlib.Path | None = None,
+    cache_cases: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     git_checkout(repo_path, ref)
@@ -315,6 +316,25 @@ def compile_group(
                     {f"build.{key}": value for key, value in key_components.items()}
                 )
                 reused = executables.restore(output_dir)
+                if reused is None and cache_cases and case_identity(cache_cases) != case_identity(cases):
+                    # Reconstruct an exact catalog identity. Never execute a prefix match.
+                    requested = {case["id"]: case for case in case_identity(cases)}
+                    available = {case["id"]: case for case in case_identity(cache_cases)}
+                    if all(available.get(key) == value for key, value in requested.items()):
+                        catalog_identity = executable_identity(
+                            repo_path, workdir, target_dir, cache_cases,
+                            build_identity(repo_path, workdir, cache_cases),
+                        )
+                        catalog_cache = ExecutableCache(repo_path, catalog_identity, writer=False)
+                        catalog_results = catalog_cache.restore(output_dir)
+                        catalog_cache.cache.record["catalog_executables_restored"] = catalog_cache.cache.record.pop("executables_reused", 0)
+                        append_record(output_dir, {
+                            **catalog_cache.cache.record,
+                            "label": f"{group_id}/{side} executable catalog",
+                        })
+                        if catalog_results is not None:
+                            reused = [item for item in catalog_results if item["id"] in requested]
+                            executables.cache.record.update(restore="catalog", executables_reused=len(reused))
                 if reused is not None:
                     append_record(
                         output_dir,
@@ -438,6 +458,7 @@ def main() -> int:
     parser.add_argument("--ref", required=True)
     parser.add_argument("--target-dir")
     parser.add_argument("--cases-json", default=os.environ.get("CASES_JSON", "[]"))
+    parser.add_argument("--cache-cases-json", default=os.environ.get("CACHE_CASES_JSON", "[]"))
     parser.add_argument(
         "--peer-cases-json", default=os.environ.get("PEER_CASES_JSON", "[]")
     )
@@ -460,6 +481,7 @@ def main() -> int:
         pathlib.Path(args.output).resolve(),
         group_id=args.group_id,
         side=args.side,
+        cache_cases=json.loads(args.cache_cases_json),
         peer_ref=args.peer_ref,
         peer_cases=json.loads(args.peer_cases_json),
         download_writer=args.download_writer == "true",

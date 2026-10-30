@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import sys
 import time
+from build_cache import append_record
 from typing import Any
 
 SCRIPT_DIR = pathlib.Path(__file__).resolve().parent
@@ -594,10 +595,14 @@ def run_execution(
     )
     lifecycle: dict[str, Any] = {}
     result: dict[str, Any] | None = None
+    started = time.monotonic()
+    timings = {"kind": "execution", "label": f"{case_slug}/{side}", "side": side}
 
     try:
         if setup_command:
+            stage_started = time.monotonic()
             setup = run_lifecycle_command(setup_command, cwd, environment)
+            timings["setup_seconds"] = round(time.monotonic() - stage_started, 3)
             setup_log = write_lifecycle_log(log_dir, side, "setup", setup)
             lifecycle["setup"] = lifecycle_metadata(setup, setup_log)
             if setup["exit_code"] != 0:
@@ -625,6 +630,7 @@ def run_execution(
                 )
 
         if result is None and readiness_command:
+            stage_started = time.monotonic()
             readiness = run_readiness_command(
                 readiness_command,
                 cwd,
@@ -632,6 +638,7 @@ def run_execution(
                 readiness_timeout_seconds,
                 retry_interval_seconds=readiness_retry_interval_seconds,
             )
+            timings["readiness_seconds"] = round(time.monotonic() - stage_started, 3)
             readiness_log = write_lifecycle_log(
                 log_dir, side, "readiness", readiness
             )
@@ -646,6 +653,7 @@ def run_execution(
                 )
 
         if result is None:
+            stage_started = time.monotonic()
             result = run_command(
                 command,
                 cwd,
@@ -654,9 +662,13 @@ def run_execution(
                 criterion_statistic,
                 environment,
             )
+            timings["benchmark_command_seconds"] = round(time.monotonic() - stage_started, 3)
+            timings["includes_cargo"] = command.lstrip().startswith("cargo ")
     finally:
         if teardown_command:
+            stage_started = time.monotonic()
             teardown = run_lifecycle_command(teardown_command, cwd, environment)
+            timings["teardown_seconds"] = round(time.monotonic() - stage_started, 3)
             teardown_log = write_lifecycle_log(
                 log_dir, side, "teardown", teardown
             )
@@ -669,6 +681,8 @@ def run_execution(
                 else:
                     result = add_teardown_error(result, teardown)
         environment_file.unlink(missing_ok=True)
+        timings["execution_seconds"] = round(time.monotonic() - started, 3)
+        append_record(log_dir, timings)
 
     if result is None:
         raise RuntimeError(f"{side} benchmark execution did not produce a result")

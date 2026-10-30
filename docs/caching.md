@@ -8,9 +8,11 @@ including base measurements, runs again. The project's build profile, LTO,
 optimization settings and compiler flags are preserved.
 
 | Input | Default | Effect |
-|---|---|---|
+| --- | --- | --- |
 | `cache` | `true` | Restore and, when permitted, save persistent caches. |
 | `cache_save` | `true` | Allow elected writers to save. Set `false` for restore-only CI. |
+| `cache_save_build` | `true` | Allow large Cargo build-cache writes when the master save switch permits them. |
+| `cache_save_executables` | `true` | Allow verified executable-cache writes when the master save switch permits them. |
 | `cache_namespace` | `default` | Partition caches, or share compatible entries with other jobs in this repository. |
 | `cache_binaries` | `false` | Reuse exact executables across runs; requires reproducible builds. |
 | `binary_cache_key` | empty | Additional identity for external build inputs and custom environment. |
