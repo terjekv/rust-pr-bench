@@ -79,7 +79,8 @@ def select(benchmarks, config=None, *, tags=None, targets=None, profile=""):
                 raise ValueError(f"Unknown target profile {name!r} for {identity}")
             execution_options(options, f"{identity}.profiles.{name}")
         options = {**profiles.get(profile, {}), **overrides.get(profile, {})}
-        if options and (spec.get("command") or spec.get("head_command") or spec.get("base_command")):
+        if options and (spec.get("command") or spec.get("head_command") or spec.get("base_command")
+                        or any(isinstance(spec.get(side), dict) and spec[side].get("command") for side in ("head", "base"))):
             raise ValueError(f"Profiles require a Cargo benchmark specification: {identity}")
         # Apply execution settings equally to moved base and current head specs.
         for side in (spec, spec.get("head"), spec.get("base")):

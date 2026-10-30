@@ -181,6 +181,47 @@ jobs:
               assert "precompiled/" in result["head_command"] and "precompiled/" in result["base_command"], result
           PY
 
+      - name: Select a tag and a caller-defined profile from the warmed catalog
+        uses: ./
+        id: subset
+        with:
+          backend: all
+          working_directory: examples/sample-rust-app
+          benchmarks_json: '[{"name":"sample_callgrind_bench","bench":"sample_callgrind_bench","backend":"gungraun"},{"name":"sample_criterion_bench","bench":"sample_criterion_bench","backend":"criterion"}]'
+          benchmark_config_json: >-
+            {"version":1,"targets":{"criterion:Cargo.toml:sample_criterion_bench":{"tags":["arithmetic"]}},
+             "profiles":{"interactive":{"criterion_args":"--noplot --sample-size 10 --warm-up-time 0.5 --measurement-time 1 --nresamples 1000"}}}
+          select_tags_json: '["arithmetic"]'
+          profile: interactive
+          base_sha: ${{ github.event.pull_request.head.sha || github.sha }}
+          cache_binaries: "true"
+          cache_save: "false"
+          cache_namespace: executables-self-test-${{ github.run_id }}-${{ github.run_attempt }}
+          comment_mode: never
+      - name: Check exact catalog reuse and fresh subset measurements
+        env:
+          PERFORMANCE_PATH: ${{ steps.subset.outputs.performance_path }}
+          SELECTION_PATH: ${{ steps.subset.outputs.selection_path }}
+          HAD_ERRORS: ${{ steps.subset.outputs.had_errors }}
+        run: |
+          python3 - <<'PY'
+          import json, os, pathlib
+          records = json.load(open(os.environ["PERFORMANCE_PATH"]))
+          reused = [record for record in records if record.get("executables_reused")]
+          assert len(reused) == 2 and all(record["restore"] == "catalog" for record in reused), records
+          assert sum(record["executables_reused"] for record in reused) == 2, records
+          assert not any("compile_seconds" in record for record in records), records
+          assert os.environ["HAD_ERRORS"] == "false"
+          selection = json.load(open(os.environ["SELECTION_PATH"]))
+          assert selection["profile"] == "interactive" and selection["requested_tags"] == ["arithmetic"], selection
+          assert sum(target["selected"] for target in selection["targets"]) == 1, selection
+          results = list((pathlib.Path(os.environ["PERFORMANCE_PATH"]).parent / "artifacts").rglob("result.json"))
+          assert len(results) == 1, results
+          result = json.loads(results[0].read_text())
+          assert result["head_total"] > 0 and result["base_total"] > 0, result
+          assert result["feature_name"] == "default [interactive]", result
+          PY
+
   workflow-executables-cold:
     uses: ./.github/workflows/rust-pr-bench.yml
     permissions:
