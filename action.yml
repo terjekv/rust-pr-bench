@@ -11,6 +11,30 @@ inputs:
     description: Benchmark backend to use (gungraun, criterion, or all).
     required: false
     default: gungraun
+  benchmark_config_json:
+    description: Caller-defined target metadata and execution profiles as a versioned JSON object.
+    required: false
+    default: "{}"
+  select_tags_json:
+    description: JSON array of caller-defined tags to select; unioned with explicit targets.
+    required: false
+    default: "[]"
+  select_targets_json:
+    description: JSON array of canonical backend:manifest:target identities to select.
+    required: false
+    default: "[]"
+  profile:
+    description: Caller-defined execution profile; empty preserves existing settings.
+    required: false
+    default: ""
+  cache_save_build:
+    description: Allow elected writers to save large Cargo build caches.
+    required: false
+    default: "true"
+  cache_save_executables:
+    description: Allow elected writers to save verified executable bundles.
+    required: false
+    default: "true"
   benchmarks_json:
     description: JSON array of benchmark specifications. Empty enables auto-discovery by default.
     required: false
@@ -125,6 +149,9 @@ inputs:
     default: always
 
 outputs:
+  selection_path:
+    description: JSON evidence of requested and selected targets, tags, and execution profile.
+    value: ${{ steps.bench.outputs.selection_path }}
   has_regressions:
     description: Whether any measured regression exceeded its threshold.
     value: ${{ steps.bench.outputs.has_regressions }}
@@ -247,6 +274,12 @@ runs:
         RUST_PR_BENCH_CACHE: ${{ inputs.cache }}
         RUST_PR_BENCH_CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
         RUST_PR_BENCH_CACHE_SAVE: ${{ inputs.cache_save }}
+        RUST_PR_BENCH_BENCHMARK_CONFIG_JSON: ${{ inputs.benchmark_config_json }}
+        RUST_PR_BENCH_SELECT_TAGS_JSON: ${{ inputs.select_tags_json }}
+        RUST_PR_BENCH_SELECT_TARGETS_JSON: ${{ inputs.select_targets_json }}
+        RUST_PR_BENCH_PROFILE: ${{ inputs.profile }}
+        RUST_PR_BENCH_CACHE_SAVE_BUILD: ${{ inputs.cache_save_build }}
+        RUST_PR_BENCH_CACHE_SAVE_EXECUTABLES: ${{ inputs.cache_save_executables }}
         RUST_PR_BENCH_CACHE_BINARIES: ${{ inputs.cache_binaries }}
         RUST_PR_BENCH_BINARY_CACHE_KEY: ${{ inputs.binary_cache_key }}
         RUST_PR_BENCH_BINARY_CACHE_PATHS: ${{ inputs.binary_cache_paths }}

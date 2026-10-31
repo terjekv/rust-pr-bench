@@ -14,6 +14,9 @@ def main() -> int:
     repository = pathlib.Path("repo").resolve()
     artifacts = pathlib.Path("artifacts").resolve()
     artifacts.mkdir(exist_ok=True)
+    (artifacts / "selection.json").write_text(json.dumps({
+        key: case.get(key) for key in ("target_id", "tags", "profile", "head_run_args", "base_run_args")
+    }, indent=2))
     os.environ["RUST_PR_BENCH_RUNNER_CACHE"] = str(cache_root(repository) / "runners")
     os.environ["RUST_PR_BENCH_PERFORMANCE_DIR"] = str(artifacts)
     os.environ["RUST_PR_BENCH_CACHE_RUNNER_WRITER"] = str(

@@ -4,14 +4,18 @@ function seconds(start, end) {
   return Math.max(0, (Date.parse(end) - Date.parse(start)) / 1000) || 0;
 }
 
-function summarize(jobs) {
-  const completed = jobs.filter(job => job.status === 'completed' && job.steps?.some(step =>
+function summarize(jobs, {final = false} = {}) {
+  const selected = jobs.filter(job => job.steps?.some(step =>
     ['Precompile benchmark executables', 'Run benchmark pair'].includes(step.name)));
+  const completed = selected.filter(job => job.status === 'completed' && job.started_at && job.completed_at);
   if (!completed.length) return null;
   return {
     kind: 'jobs',
     label: 'Completed Rust PR Bench jobs in this workflow run',
     jobs: completed.length,
+    pending_jobs: selected.length - completed.length,
+    final,
+    queue_seconds: null,
     elapsed_seconds: seconds(
       new Date(Math.min(...completed.map(job => Date.parse(job.started_at)))).toISOString(),
       new Date(Math.max(...completed.map(job => Date.parse(job.completed_at)))).toISOString()),

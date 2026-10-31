@@ -21,16 +21,33 @@ def collect(directory: pathlib.Path) -> list[dict]:
 
 def render(directory: pathlib.Path) -> str:
     records = collect(directory)
-    if not records:
+    selections = []
+    for path in sorted(directory.rglob("selection.json")):
+        try:
+            value = json.loads(path.read_text())
+            if isinstance(value, dict) and isinstance(value.get("targets"), list):
+                selections.append(value)
+        except ValueError:
+            continue
+    if not records and not selections:
         return ""
-    rows = [
+    rows = []
+    for selection in selections:
+        count = sum(bool(target["selected"]) for target in selection["targets"])
+        rows.extend(["", f"Selected benchmark targets: {count}/{len(selection['targets'])}; "
+                     f"profile: {html.escape(selection.get('profile') or 'legacy defaults')}. "
+                     "Effective arguments, tags, skipped targets, and selection reasons are in selection.json."])
+        for target in selection["targets"]:
+            if target["selected"]:
+                rows.extend(html.escape(str(note)) for note in target.get("notes", []))
+    rows.extend([
         "\n<details>",
         "<summary>Build and cache performance</summary>\n",
         "| Work | Restore / save outcome | Restore / save | Contents | Compilation | Fresh / rebuilt |",
         "|---|---|---:|---:|---:|---:|",
-    ]
+    ])
     for item in records:
-        if item.get("kind") == "jobs":
+        if item.get("kind") in {"jobs", "execution"}:
             continue
         name = html.escape(str(item.get("label", item.get("kind", "build")))).replace(
             "|", "&#124;"
@@ -50,6 +67,17 @@ def render(directory: pathlib.Path) -> str:
             f"{restore_time} / {save_time} | "
             f"{size_text} | {compile_text} | {item.get('fresh', '—')} / {item.get('rebuilt', '—')} |"
         )
+    executions = [item for item in records if item.get("kind") == "execution"]
+    if executions:
+        rows.extend(["", "| Execution | Setup | Readiness | Benchmark command | Teardown | Total |",
+                     "| --- | ---: | ---: | ---: | ---: | ---: |"])
+        for item in executions:
+            label = html.escape(str(item["label"])).replace("|", "&#124;")
+            values = " | ".join(f"{item.get(key, 0):.2f}s" for key in (
+                "setup_seconds", "readiness_seconds", "benchmark_command_seconds", "teardown_seconds", "execution_seconds"))
+            rows.append(f"| {label} | {values} |")
+        rows.append("Benchmark command time includes compilation when Cargo fallback was needed; "
+                    "execution totals include the lifecycle phases above.")
     for item in records:
         if item.get("kind") == "jobs":
             rows.extend(
@@ -59,7 +87,11 @@ def render(directory: pathlib.Path) -> str:
                     f"elapsed {item['elapsed_seconds'] / 60:.2f} min; "
                     f"total runner time {item['runner_seconds'] / 60:.2f} min; "
                     f"binary artifact transfer steps {item['artifact_transfer_seconds']:.1f}s.",
-                    "These job timings exclude queueing and report generation.",
+                    "Elapsed span includes gaps and dependency waits; runner time sums job durations. "
+                    "Transfers are included in runner time. Queue time is unavailable.",
+                    ("Final snapshot." if item.get("final") else
+                     "Provisional snapshot: other lanes or jobs may still be pending. "
+                     "This is not a final workflow total."),
                 ]
             )
     rows.extend(

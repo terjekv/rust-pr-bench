@@ -20,7 +20,10 @@ class CompilationReuseTests(unittest.TestCase):
     def test_executables_survive_fresh_jobs_and_measurements_run_again(self):
         self.run_fixture(executable_reuse=True)
 
-    def run_fixture(self, *, executable_reuse=False):
+    def test_subset_reuses_warmed_catalog_without_cargo_and_measures_fresh(self):
+        self.run_fixture(executable_reuse=True, subset=True)
+
+    def run_fixture(self, *, executable_reuse=False, subset=False):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             repo = root / "repo"
@@ -215,23 +218,21 @@ os.execv({real_cargo!r}, [{real_cargo!r}, *sys.argv[1:]])
                     shutil.rmtree(target)
                 (root / "compilation-forbidden").touch()
                 warm = root / "new-job-work-directory"
+                if subset:
+                    environment["RUST_PR_BENCH_SELECT_TARGETS_JSON"] = '["criterion:Cargo.toml:first"]'
                 execute(warm)
                 records = json.loads((warm / "performance.json").read_text())
-                self.assertEqual(len(records), 2, records)
-                self.assertTrue(
-                    all(
-                        r["kind"] == "executables" and r["restore"] == "exact"
-                        for r in records
-                    ),
-                    records,
-                )
-                self.assertEqual(sum(r["executables_reused"] for r in records), 4)
+                restores = [r for r in records if r.get("executables_reused")]
+                self.assertEqual(len(restores), 2, records)
+                self.assertTrue(all(r["restore"] == ("catalog" if subset else "exact") for r in restores))
+                self.assertEqual(sum(r["executables_reused"] for r in restores), 2 if subset else 4)
+                self.assertEqual(len(list((warm / "artifacts").rglob("result.json"))), 1 if subset else 2)
                 for path in (warm / "artifacts").rglob("result.json"):
                     data = json.loads(path.read_text())
                     self.assertEqual(data["head_total"], 110, data)
                     self.assertEqual(data["base_total"], 100, data)
                 self.assertEqual(
-                    len((root / "measurements").read_text().splitlines()), 8
+                    len((root / "measurements").read_text().splitlines()), 6 if subset else 8
                 )
                 self.assertFalse(list((root / "remote").rglob("estimates.json")))
                 self.assertFalse(list((root / "remote").rglob("performance.jsonl")))

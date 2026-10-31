@@ -21,6 +21,7 @@ from backend_names import (  # noqa: E402
     normalize_backend,
     normalize_backend_selection,
 )
+from benchmark_selection import select
 
 NATIVE_TARGET_CPU_RE = re.compile(r"target-cpu\s*=\s*native", re.IGNORECASE)
 
@@ -320,10 +321,10 @@ def build_command(
             parts.append(str(extra_args))
         if cargo_args.strip():
             parts.append(cargo_args.strip())
-        if backend == "criterion":
-            criterion_args = str(spec.get("criterion_args", criterion_cli_args)).strip()
-            if criterion_args:
-                parts.extend(["--", criterion_args])
+        binary_args = str(spec.get("criterion_args", criterion_cli_args) if backend == "criterion"
+                          else spec.get("gungraun_args", "")).strip()
+        if binary_args:
+            parts.extend(["--", binary_args])
         command = " ".join(parts)
 
     if command and spec.get("command") and cargo_args.strip():
@@ -427,7 +428,11 @@ def make_matrix(
                     "id": case_id,
                     "backend": backend,
                     "benchmark_name": bench_name,
-                    "feature_name": feature_set["name"],
+                    "feature_name": (f"{feature_set['name']} [{bench['profile']}]"
+                                     if bench.get("profile") else feature_set["name"]),
+                    "profile": bench.get("profile", ""),
+                    "target_id": bench.get("target_id", ""),
+                    "tags": bench.get("tags", []),
                     "command": command,
                     "head_command": head_command,
                     "base_command": base_command,
@@ -494,7 +499,8 @@ def uses_native_target_cpu(command: str) -> bool:
 
 
 def make_build_matrix(
-    matrix: dict[str, list[dict[str, Any]]], *, head_only: bool = False
+    matrix: dict[str, list[dict[str, Any]]], *, head_only: bool = False,
+    catalog: dict | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     groups: dict[tuple[str, str], list[dict[str, Any]]] = {}
     metadata: dict[tuple[str, str], dict[str, Any]] = {}
@@ -541,6 +547,11 @@ def make_build_matrix(
                 "cases": [],
             }
         )
+    if catalog is not None:
+        full_groups = {item["id"]: item for item in make_build_matrix(catalog)["include"]}
+        for item in include:
+            if item["enabled"]:
+                item["cache_cases"] = full_groups[item["id"]]["cases"]
     return {"include": include}
 
 
@@ -577,6 +588,12 @@ def main() -> int:
     parser.add_argument("--cargo-args", default="")
     parser.add_argument("--output", required=True)
     parser.add_argument("--build-output")
+    parser.add_argument("--catalog-output")
+    parser.add_argument("--selection-output")
+    parser.add_argument("--benchmark-config-json", default=os.environ.get("RUST_PR_BENCH_BENCHMARK_CONFIG_JSON", "{}"))
+    parser.add_argument("--select-tags-json", default=os.environ.get("RUST_PR_BENCH_SELECT_TAGS_JSON", "[]"))
+    parser.add_argument("--select-targets-json", default=os.environ.get("RUST_PR_BENCH_SELECT_TARGETS_JSON", "[]"))
+    parser.add_argument("--profile", default=os.environ.get("RUST_PR_BENCH_PROFILE", ""))
     parsed_argv = normalize_option_values(
         sys.argv[1:],
         value_options={"--criterion-cli-args", "--cargo-args"},
@@ -617,6 +634,12 @@ def main() -> int:
 
     feature_sets = normalize_feature_sets(json.loads(args.feature_sets_json))
 
+    benchmarks, catalog, selection = select(
+        benchmarks, json.loads(args.benchmark_config_json),
+        tags=json.loads(args.select_tags_json), targets=json.loads(args.select_targets_json),
+        profile=args.profile,
+    )
+
     matrix = make_matrix(
         benchmarks,
         feature_sets,
@@ -624,12 +647,17 @@ def main() -> int:
         args.criterion_cli_args,
     )
     pathlib.Path(args.output).write_text(json.dumps(matrix), encoding="utf-8")
+    catalog_matrix = make_matrix(catalog, feature_sets, args.cargo_args, args.criterion_cli_args)
+    if args.catalog_output:
+        pathlib.Path(args.catalog_output).write_text(json.dumps(catalog_matrix), encoding="utf-8")
+    if args.selection_output:
+        pathlib.Path(args.selection_output).write_text(json.dumps(selection, indent=2), encoding="utf-8")
     head_only = os.environ.get("RUST_PR_BENCH_COMPILE_ONLY", "false") == "true"
     if head_only and any(not case["precompile"] for case in matrix["include"]):
         raise ValueError("compile_only requires separable, portable cargo bench commands")
     if args.build_output:
         pathlib.Path(args.build_output).write_text(
-            json.dumps(make_build_matrix(matrix, head_only=head_only)), encoding="utf-8"
+            json.dumps(make_build_matrix(matrix, head_only=head_only, catalog=catalog_matrix)), encoding="utf-8"
         )
     return 0
 

@@ -30,6 +30,15 @@ def extract_job_block(workflow_text: str, job_name: str) -> str:
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_selection_and_cache_controls_are_wired_in_both_interfaces(self):
+        for name in ("action.yml", ".github/workflows/rust-pr-bench.yml"):
+            text = (REPO_ROOT / name).read_text()
+            for key in ("benchmark_config_json", "select_tags_json", "select_targets_json", "profile",
+                        "cache_save_build", "cache_save_executables"):
+                with self.subTest(interface=name, input=key):
+                    self.assertIn(key + ":", text)
+                    self.assertIn("RUST_PR_BENCH_" + key.upper() + ": ${{ inputs." + key + " }}", text)
+
     def test_root_metadata_defines_the_marketplace_action(self) -> None:
         metadata = (REPO_ROOT / "action.yml").read_text(encoding="utf-8")
 

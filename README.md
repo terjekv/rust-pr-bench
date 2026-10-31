@@ -10,6 +10,11 @@ This repository is the successor to
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 The original repository remains available for existing `v1`–`v3` reusable-workflow consumers.
 
+Latest release: [v1.4.0](https://github.com/terjekv/rust-pr-bench/releases/tag/v1.4.0)
+(2026-10-31), adding caller-defined tags, target selection, execution profiles,
+verified subset cache reuse, and more complete timing evidence. Existing callers
+retain their defaults.
+
 ## Choose an interface
 
 Rust PR Bench provides two interfaces backed by the same comparison and reporting code:
@@ -213,8 +218,8 @@ Lifecycle commands receive these environment variables:
 - `RUST_PR_BENCH_WORKING_DIRECTORY`: absolute command working directory.
 - `CARGO_TARGET_DIR`: isolated target directory used by the benchmark.
 
-The setup command can append `NAME=value` lines to `RUST_PR_BENCH_ENV_FILE`. An optional `export `
-prefix is accepted; values are treated literally, without shell evaluation. These values are loaded
+The setup command can append `NAME=value` lines to `RUST_PR_BENCH_ENV_FILE`. An optional `export`
+prefix followed by a space is accepted; values are treated literally, without shell evaluation. These values are loaded
 for readiness, the benchmark, and teardown, then the file is deleted. `CARGO_TARGET_DIR` and
 `RUST_PR_BENCH_*` variables cannot be overridden through the file. Do not print secrets: command
 output is captured in lifecycle logs.
@@ -286,6 +291,65 @@ IAI-Callgrind part of the new public backend API:
   }
 ]
 ```
+
+## Target tags and execution profiles
+
+Tags and profiles are optional caller-owned configuration. Rust PR Bench does not
+define repository scopes, tag names, profile names, path policies, or GitHub label
+mappings. Existing callers keep their current selection and execution settings.
+
+`select_tags_json` and `select_targets_json` select their union before creating
+compilation and execution matrices. Target selectors use the canonical
+`backend:manifest_path:bench` identity, where the default manifest is `Cargo.toml`
+relative to `working_directory`. Unknown explicit selectors are errors.
+
+Specifications in `benchmarks_json` may contain `tags` and per-target `profiles`.
+For autodiscovery, optional metadata references discovered target identities:
+
+```yaml
+benchmark_config_json: >-
+  {
+    "version": 1,
+    "targets": {
+      "criterion:Cargo.toml:sample_criterion_bench": {"tags": ["arithmetic"]}
+    },
+    "profiles": {
+      "interactive": {"criterion_args": "--noplot --sample-size 10 --measurement-time 1"},
+      "laboratory": {"criterion_args": "--noplot --sample-size 100 --measurement-time 10"}
+    }
+  }
+select_tags_json: '["arithmetic"]'
+profile: interactive
+```
+
+Profiles accept `criterion_args` and `gungraun_args`, including backend-native case
+filters. Per-target profile settings override defaults. A profile changes execution
+arguments, never Cargo settings; custom command overrides manage their own settings
+instead of using profiles. Both revisions receive the same profile arguments,
+including moved targets. Callers own any legacy per-group overrides or incompatible
+cases in their benchmark binaries.
+
+Profiles have separate feature/history labels while retaining compatible executable
+identities. Selection evidence records targets, tags, profile, effective arguments,
+and selected/skipped reasons. The composite action exposes `selection_path`; the
+reusable workflow retains `selection.json` artifacts.
+
+Full catalogs support exact verified subset restores from warmed executable
+bundles. Missing or incompatible bundles compile only the selected targets.
+Runtime-only profile changes do not invalidate executable caches; measurements
+always run fresh.
+
+`cache_save_build` and `cache_save_executables` independently control elected writers
+and default to `true`. The existing `cache_save` switch remains the master control.
+Callers can restore large build caches without writing PR duplicates while keeping
+useful executable bundles.
+
+Build/cache JSONL records include versioned operation IDs for deduplicating artifact
+copies. Execution evidence separates setup, readiness, benchmark command, teardown,
+and total duration. Benchmark-command time includes compilation on Cargo fallback.
+Lane reports are provisional snapshots of completed jobs: elapsed spans include gaps
+and dependency waits, and queue time is unavailable. Callers combining lanes should
+publish final aggregates only after selected work terminates.
 
 ## Feature sets
 
