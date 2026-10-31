@@ -17,4 +17,19 @@ test('separates elapsed time from total runner work and artifact transfer', () =
   assert.equal(summary.elapsed_seconds, 120);
   assert.equal(summary.runner_seconds, 240);
   assert.equal(summary.artifact_transfer_seconds, 60);
+  assert.equal(summary.pending_jobs, 1);
+  assert.equal(summary.final, false);
+  assert.equal(summary.queue_seconds, null);
+});
+
+test('final evidence includes completed cancelled and failed jobs', () => {
+  const jobs = ['success', 'failure', 'cancelled'].map((conclusion, index) => ({
+    id: index, status: 'completed', conclusion,
+    started_at: '2026-01-01T00:00:00Z', completed_at: '2026-01-01T00:01:00Z',
+    steps: [{name: 'Run benchmark pair'}],
+  }));
+  const summary = summarize(jobs, {final: true});
+  assert.equal(summary.jobs, 3);
+  assert.equal(summary.final, true);
+  assert.equal(summary.runner_seconds, 180);
 });
