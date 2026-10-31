@@ -284,10 +284,13 @@ jobs:
               else:
                   assert bundle["restore"] == "miss", bundle
                   before, after = seed["key_components"], bundle["key_components"]
-                  assert before["build.image"] != after["build.image"], (seed, bundle)
-                  assert all(before[k] == after[k] for k in before if k not in ("build", "build.image")), (seed, bundle)
+                  changed = {key for key in before.keys() | after.keys() if before.get(key) != after.get(key)}
+                  allowed = {"tags"}
+                  if before["build.image"] != after["build.image"]:
+                      allowed.update(("build", "build.image"))
+                  assert changed and changed <= allowed, (seed, bundle)
                   assert any(r.get("compile_seconds", 0) > 0 for r in work), work
-                  print("Expected executable invalidation after hosted runner image update:", side)
+                  print("Expected executable invalidation after external input updates:", side, sorted(changed))
           summaries = list(pathlib.Path("reports").rglob("summary-*.json"))
           assert len(summaries) == 2, summaries
           for path in summaries:

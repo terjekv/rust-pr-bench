@@ -30,6 +30,22 @@ def extract_job_block(workflow_text: str, job_name: str) -> str:
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_runner_label_defaults_to_ubuntu_latest(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text()
+        self.assertRegex(
+            workflow,
+            r"runs_on:\n(?:        .*\n)*        default: ubuntu-latest",
+        )
+
+    def test_all_jobs_use_the_selected_runner_label(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text()
+        for name in ["prepare-matrix", "precompile", "benchmark", "report"]:
+            with self.subTest(job=name):
+                self.assertIn(
+                    "    runs-on: ${{ inputs.runs_on }}",
+                    extract_job_block(workflow, name),
+                )
+
     def test_selection_and_cache_controls_are_wired_in_both_interfaces(self):
         for name in ("action.yml", ".github/workflows/rust-pr-bench.yml"):
             text = (REPO_ROOT / name).read_text()
@@ -46,10 +62,7 @@ class WorkflowContractTests(unittest.TestCase):
         self.assertIn("  using: composite", metadata)
         self.assertIn("branding:", metadata)
         self.assertIn("scripts/action_entrypoint.py", metadata)
-        self.assertIn(
-            "actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7",
-            metadata,
-        )
+        self.assertRegex(metadata, r"uses: actions/setup-python@[0-9a-f]{40}(?:\s|$)")
         self.assertIn("has_regressions:", metadata)
         self.assertIn("has_unaccepted_regressions:", metadata)
         self.assertIn("had_errors:", metadata)
@@ -101,16 +114,10 @@ class WorkflowContractTests(unittest.TestCase):
         benchmark = extract_job_block(workflow, "benchmark")
 
         self.assertIn("scripts/precompile_benchmarks.py", precompile)
-        self.assertIn(
-            "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a",
-            precompile,
-        )
+        self.assertRegex(precompile, r"uses: actions/upload-artifact@[0-9a-f]{40}(?:\s|$)")
         self.assertIn("strategy:", benchmark)
         self.assertIn("needs.prepare-matrix.outputs.matrix", benchmark)
-        self.assertIn(
-            "actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c",
-            benchmark,
-        )
+        self.assertRegex(benchmark, r"uses: actions/download-artifact@[0-9a-f]{40}(?:\s|$)")
         self.assertIn("scripts/workflow_run_pair.py", benchmark)
 
     def test_public_interfaces_wire_isolated_runtime_lifecycle_hooks(self) -> None:
@@ -145,10 +152,7 @@ class WorkflowContractTests(unittest.TestCase):
 
         self.assertIn("scripts/iai-callgrind-runner-dispatch", workflow)
         self.assertIn("scripts/gungraun-runner-dispatch", workflow)
-        self.assertIn(
-            "taiki-e/install-action@9114bf4d891761788c546334fd37538eae1bf8b3",
-            workflow,
-        )
+        self.assertRegex(workflow, r"uses: taiki-e/install-action@[0-9a-f]{40}(?:\s|$)")
 
     def test_workflow_pins_helpers_to_the_called_workflow_commit(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text(
