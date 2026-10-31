@@ -345,7 +345,7 @@ jobs:
           echo "binary_value=bench-binary-${HASH}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
 
       - name: Upload benchmark selection
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ steps.artifact_prefix.outputs.value }}-selection
           path: selection.json
@@ -409,7 +409,7 @@ jobs:
 
       - name: Upload build performance
         if: always() && matrix.enabled && (!inputs.compile_only || matrix.side == 'head')
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-build-${{ matrix.group_id }}-${{ matrix.side }}
           path: precompiled/performance.jsonl
@@ -421,7 +421,7 @@ jobs:
 
       - name: Upload benchmark executables
         if: matrix.enabled && !inputs.compile_only
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ needs.prepare-matrix.outputs.binary_artifact_prefix }}-${{ matrix.group_id }}-${{ matrix.side }}
           path: precompiled
@@ -552,7 +552,7 @@ jobs:
 
       - name: Upload result
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ needs.prepare-matrix.outputs.artifact_prefix }}-${{ matrix.id }}
           path: |
@@ -850,7 +850,7 @@ jobs:
           echo "value=bench-report-${{ needs.prepare-matrix.outputs.normalized_backend }}-${{ github.run_id }}-${{ github.run_attempt }}-$(date +%s%N)" >> "$GITHUB_OUTPUT"
 
       - name: Upload report artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: ${{ steps.report_artifact_name.outputs.value }}
           path: |
