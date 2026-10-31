@@ -3,6 +3,11 @@ name: Rust PR Bench
 on:
   workflow_call:
     inputs:
+      runs_on:
+        description: Runner label used for preparation, compilation, measurements, and reporting.
+        required: false
+        type: string
+        default: ubuntu-latest
       backend:
         description: Benchmark backend to use (gungraun, criterion, or all).
         required: false
@@ -18,6 +23,36 @@ on:
         required: false
         type: string
         default: ""
+      benchmark_config_json:
+        description: Caller-defined target metadata and execution profiles as a versioned JSON object.
+        required: false
+        type: string
+        default: "{}"
+      select_tags_json:
+        description: JSON array of caller-defined tags to select; unioned with explicit targets.
+        required: false
+        type: string
+        default: "[]"
+      select_targets_json:
+        description: JSON array of canonical backend:manifest:target identities to select.
+        required: false
+        type: string
+        default: "[]"
+      profile:
+        description: Caller-defined execution profile; empty preserves existing settings.
+        required: false
+        type: string
+        default: ""
+      cache_save_build:
+        description: Allow elected writers to save large Cargo build caches.
+        required: false
+        type: boolean
+        default: true
+      cache_save_executables:
+        description: Allow elected writers to save verified executable bundles.
+        required: false
+        type: boolean
+        default: true
       benchmarks_json:
         description: >-
           JSON array of benchmark specs. String entries are treated as cargo --bench targets.
@@ -180,6 +215,12 @@ env:
   RUST_PR_BENCH_CACHE: ${{ inputs.cache }}
   RUST_PR_BENCH_CACHE_NAMESPACE: ${{ inputs.cache_namespace }}
   RUST_PR_BENCH_CACHE_SAVE: ${{ inputs.cache_save }}
+  RUST_PR_BENCH_BENCHMARK_CONFIG_JSON: ${{ inputs.benchmark_config_json }}
+  RUST_PR_BENCH_SELECT_TAGS_JSON: ${{ inputs.select_tags_json }}
+  RUST_PR_BENCH_SELECT_TARGETS_JSON: ${{ inputs.select_targets_json }}
+  RUST_PR_BENCH_PROFILE: ${{ inputs.profile }}
+  RUST_PR_BENCH_CACHE_SAVE_BUILD: ${{ inputs.cache_save_build }}
+  RUST_PR_BENCH_CACHE_SAVE_EXECUTABLES: ${{ inputs.cache_save_executables }}
   RUST_PR_BENCH_CACHE_BINARIES: ${{ inputs.cache_binaries }}
   RUST_PR_BENCH_BINARY_CACHE_KEY: ${{ inputs.binary_cache_key }}
   RUST_PR_BENCH_BINARY_CACHE_PATHS: ${{ inputs.binary_cache_paths }}
@@ -187,7 +228,7 @@ env:
 
 jobs:
   prepare-matrix:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       build_matrix: ${{ steps.matrix.outputs.build_matrix }}
@@ -259,7 +300,8 @@ jobs:
             --base-sha "${{ steps.refs.outputs.base_sha }}" \
             --cargo-args "${{ inputs.cargo_args }}" \
             --output matrix.json \
-            --build-output build-matrix.json
+            --build-output build-matrix.json \
+            --selection-output selection.json
 
           echo "matrix=$(cat matrix.json)" >> "$GITHUB_OUTPUT"
           echo "build_matrix=$(cat build-matrix.json)" >> "$GITHUB_OUTPUT"
@@ -283,6 +325,10 @@ jobs:
               '${{ inputs.cache_namespace }}' \
               '${{ inputs.cache_binaries }}' \
               '${{ inputs.compile_only }}' \
+              "$RUST_PR_BENCH_BENCHMARK_CONFIG_JSON" \
+              "$RUST_PR_BENCH_SELECT_TAGS_JSON" \
+              "$RUST_PR_BENCH_SELECT_TARGETS_JSON" \
+              "$RUST_PR_BENCH_PROFILE" \
               "$SETUP_COMMAND" \
               "$READINESS_COMMAND" \
               "$TEARDOWN_COMMAND" \
@@ -295,11 +341,18 @@ jobs:
               '${{ inputs.action_ref != '' && inputs.action_ref || job.workflow_sha }}'
           )"
           HASH="$(printf '%s' "$INPUT_FINGERPRINT" | sha256sum | cut -c1-12)"
-          echo "value=bench-result-${HASH}" >> "$GITHUB_OUTPUT"
-          echo "binary_value=bench-binary-${HASH}" >> "$GITHUB_OUTPUT"
+          echo "value=bench-result-${HASH}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+          echo "binary_value=bench-binary-${HASH}-${{ github.run_attempt }}" >> "$GITHUB_OUTPUT"
+
+      - name: Upload benchmark selection
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ steps.artifact_prefix.outputs.value }}-selection
+          path: selection.json
+
 
   precompile:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     needs: prepare-matrix
     env:
       IAI_CALLGRIND_RUNNER: ${{ github.workspace }}/action-src/scripts/iai-callgrind-runner-dispatch
@@ -336,6 +389,7 @@ jobs:
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9
         env:
           CASES_JSON: ${{ toJson(matrix.cases) }}
+          CACHE_CASES_JSON: ${{ toJson(matrix.cache_cases) }}
           PEER_CASES_JSON: ${{ toJson(matrix.peer_cases) }}
           BENCHMARK_REF: ${{ matrix.side == 'head' && needs.prepare-matrix.outputs.head_sha || needs.prepare-matrix.outputs.base_sha }}
           PEER_REF: ${{ needs.prepare-matrix.outputs.head_sha }}
@@ -374,7 +428,7 @@ jobs:
           include-hidden-files: true
 
   benchmark:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     if: >-
       always() &&
       needs.prepare-matrix.result == 'success' && !inputs.compile_only
@@ -505,9 +559,10 @@ jobs:
             artifacts/result.json
             artifacts/*.log
             artifacts/performance.jsonl
+            artifacts/selection.json
 
   report:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runs_on }}
     if: always() && needs.prepare-matrix.result == 'success' && !inputs.compile_only
     needs:
       - prepare-matrix

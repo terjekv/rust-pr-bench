@@ -164,6 +164,8 @@ def expand_cases(
         action_input("cargo_args"),
         "--output",
         str(matrix_path),
+        "--catalog-output", str(work_dir / "catalog.json"),
+        "--selection-output", str(work_dir / "selection.json"),
     ]
     if parse_bool(action_input("auto_discover", "true"), "auto_discover"):
         command.append("--auto-discover")
@@ -383,10 +385,14 @@ def main() -> int:
         cases = expand_cases(
             benchmark_repository, work_dir, base_sha, head_sha, backend
         )
+        write_action_outputs({"selection_path": str(work_dir / "selection.json")})
         compile_only = parse_bool(action_input("compile_only", "false"), "compile_only")
         os.environ["RUST_PR_BENCH_RUNNER_CACHE"] = str(cache_root(source_repository) / "runners")
         os.environ["RUST_PR_BENCH_PERFORMANCE_DIR"] = str(work_dir / "performance")
-        groups = make_build_matrix({"include": cases}, head_only=compile_only)["include"]
+        groups = make_build_matrix(
+            {"include": cases}, head_only=compile_only,
+            catalog=json.loads((work_dir / "catalog.json").read_text()),
+        )["include"]
         build_errors = compile_only and any(not case["precompile"] for case in cases)
         workdir = (benchmark_repository / action_input("working_directory", ".")).resolve()
         head_identities = {
@@ -404,6 +410,7 @@ def main() -> int:
                 peer_identity=head_identities.get(group["group_id"]),
                 peer_ref=head_sha, peer_cases=group["peer_cases"],
                 download_writer=group["download_writer"], allow_native=True,
+                cache_cases=group.get("cache_cases"),
             )
             build_errors |= not all(item["precompiled"] for item in results)
         if compile_only:

@@ -17,6 +17,7 @@ import shlex
 import subprocess
 import tempfile
 import time
+import uuid
 from typing import Any
 
 
@@ -145,6 +146,7 @@ class Cache:
         self.key = self.prefix + dependencies
         self.paths = paths
         self.writer = writer
+        self.kind = kind
         self.exact_only = exact_only
         self.record: dict[str, Any] = {
             "kind": kind,
@@ -226,7 +228,7 @@ class Cache:
             return
         if not success:
             self.record["save"] = "build-failed"
-        elif not enabled("CACHE_SAVE") or not self.writer:
+        elif not enabled("CACHE_SAVE") or not enabled(f"CACHE_SAVE_{self.kind.upper()}") or not self.writer:
             self.record["save"] = "read-only"
         elif self.record.get("matched_key") == self.key:
             self.record["save"] = "already-exists"
@@ -246,7 +248,7 @@ class Cache:
 def append_record(directory: pathlib.Path, record: dict[str, Any]) -> None:
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / "performance.jsonl").open("a") as handle:
-        handle.write(json.dumps(record) + "\n")
+        handle.write(json.dumps({"version": 1, "operation_id": str(uuid.uuid4()), **record}) + "\n")
 
 
 def download_cache(

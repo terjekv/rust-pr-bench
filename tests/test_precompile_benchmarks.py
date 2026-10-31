@@ -14,6 +14,31 @@ precompile_benchmarks = load_script_module(
 
 
 class PrecompileBenchmarksTests(unittest.TestCase):
+    def test_workspace_subsets_restore_the_full_catalog_dependency_cache(self):
+        catalog = [{"id": name, "benchmark_name": name, "compile_command": command}
+                   for name, command in (("root", "cargo bench --bench root --no-run"),
+                                         ("member", "cargo bench --manifest-path member/Cargo.toml --bench member --no-run"))]
+        restored = []
+        def restore(entry):
+            if entry.kind == "build":
+                restored.append(entry.key)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            with (mock.patch.object(precompile_benchmarks, "git_checkout"),
+                  mock.patch.object(precompile_benchmarks, "native_target_cpu_requested", return_value=False),
+                  mock.patch.object(precompile_benchmarks, "build_identity",
+                                    side_effect=lambda repo, workdir, cases, **kwargs: (str(len(cases)), "deps")),
+                  mock.patch.object(precompile_benchmarks.Cache, "restore", autospec=True, side_effect=restore),
+                  mock.patch.object(precompile_benchmarks.Cache, "save"),
+                  mock.patch.object(precompile_benchmarks, "precompile_case", return_value={"precompiled": True}) as compile_case):
+                for cases in (catalog, catalog[:1]):
+                    precompile_benchmarks.LOCAL_BUILDS.clear()
+                    precompile_benchmarks.LOCAL_DOWNLOADS.clear()
+                    precompile_benchmarks.compile_group(root, root, "head", cases, root / "output",
+                                                       cache_cases=catalog, target_dir=root / "target")
+                self.assertEqual(restored[0], restored[1])
+                self.assertEqual(compile_case.call_count, 3)
+
     def test_missing_runtime_file_leaves_no_executable_for_the_measurement_job(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary).resolve()
