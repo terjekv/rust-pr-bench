@@ -10,10 +10,10 @@ This repository is the successor to
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 The original repository remains available for existing `v1`–`v3` reusable-workflow consumers.
 
-Latest release: [v1.4.0](https://github.com/terjekv/rust-pr-bench/releases/tag/v1.4.0)
-(2026-10-31), adding caller-defined tags, target selection, execution profiles,
-verified subset cache reuse, and more complete timing evidence. Existing callers
-retain their defaults.
+Latest release: [v1.4.1](https://github.com/terjekv/rust-pr-bench/releases/tag/v1.4.1)
+(2026-10-31), adding configurable workflow runner images and refreshing the bundled
+cache transport. Includes caller-defined tags, target selection, execution profiles,
+verified subset cache reuse, and lifecycle timings. Existing callers retain their defaults.
 
 ## Choose an interface
 

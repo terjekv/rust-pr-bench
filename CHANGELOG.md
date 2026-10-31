@@ -7,11 +7,23 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.1] - 2026-10-31
+
 ### Added
 
 - Allow reusable-workflow callers to select a runner image with `runs_on`. Compilation and
   execution use the same image; the default remains `ubuntu-latest`. This lets callers select
   a newer profiler when the default image cannot read symbols in their Rust executables.
+
+### Changed
+
+- Update the pinned installer, Python/Node setup, and artifact-transfer actions.
+- Refresh the sample application to Gungraun 0.20.0 while retaining legacy runner coverage.
+- Upgrade the bundled cache transport to `@actions/cache` 6.3.0 and regenerate its license notices.
+
+### Security
+
+- Update the bundled Undici dependency to 6.29.1 for its security fixes.
 
 ## [1.4.0] - 2026-10-31
 
@@ -137,7 +149,8 @@ Rust PR Bench originated in
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 That repository retains the historical changelog and existing `v1`–`v3` compatibility releases.
 
-[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.4.1...HEAD
+[1.4.1]: https://github.com/terjekv/rust-pr-bench/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.1...v1.2.0
