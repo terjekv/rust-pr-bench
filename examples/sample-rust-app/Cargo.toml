@@ -11,7 +11,7 @@ alt-impl = []
 
 [dev-dependencies]
 iai-callgrind = "0.16.1"
-gungraun = "0.19.4"
+gungraun = "0.20.0"
 criterion = "0.8.2"
 
 [[bench]]
