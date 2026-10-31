@@ -91,6 +91,19 @@ class BuildCacheTests(unittest.TestCase):
                 self.assertEqual(entry.record["save"], "build-failed")
                 operation.assert_not_called()
 
+    def test_large_builds_can_be_restore_only_while_executables_are_saved(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            (root / "artifact").write_text("fixture")
+            with mock.patch.dict(os.environ, {"ACTIONS_RUNTIME_TOKEN": "test", "RUST_PR_BENCH_CACHE_SAVE_BUILD": "false"}, clear=True):
+                for kind, expected in (("build", "read-only"), ("executables", "saved")):
+                    with self.subTest(kind=kind):
+                        entry = cache.Cache(kind, [root], "compiler", "deps")
+                        with mock.patch.object(entry, "operation", return_value={"status": "saved"}) as operation:
+                            entry.save()
+                            self.assertEqual(entry.record["save"], expected)
+                            self.assertEqual(operation.call_count, int(kind == "executables"))
+
     def test_exact_hit_does_not_attempt_an_immutable_save(self):
         with mock.patch.dict(os.environ, {"ACTIONS_RUNTIME_TOKEN": "test"}, clear=True):
             entry = cache.Cache("build", [], "compiler", "deps")
