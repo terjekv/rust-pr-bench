@@ -4,6 +4,9 @@ on:
   pull_request:
     paths:
       - "action.yml"
+      - "package.json"
+      - "package-lock.json"
+      - "dist/cache/**"
       - ".github/workflows/ci.yml"
       - ".github/workflows/rust-pr-bench.yml"
       - ".github/workflows/release.yml"

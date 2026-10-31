@@ -1,3 +1,4 @@
+from fnmatch import fnmatchcase
 import re
 import unittest
 
@@ -30,6 +31,14 @@ def extract_job_block(workflow_text: str, job_name: str) -> str:
 
 
 class WorkflowContractTests(unittest.TestCase):
+    def test_sample_workflow_validates_packaged_cache_transport(self) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/sample-self-test.yml").read_text()
+        paths = workflow.split("    paths:\n", 1)[1].split("\npermissions:", 1)[0]
+        patterns = re.findall(r'^      - "([^"]+)"$', paths, re.MULTILINE)
+        for path in ("package.json", "package-lock.json", "dist/cache/index.mjs", "dist/cache/licenses.txt"):
+            with self.subTest(path=path):
+                self.assertTrue(any(fnmatchcase(path, pattern) for pattern in patterns))
+
     def test_runner_label_defaults_to_ubuntu_latest(self) -> None:
         workflow = (REPO_ROOT / ".github/workflows/rust-pr-bench.yml").read_text()
         self.assertRegex(
