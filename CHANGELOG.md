@@ -7,6 +7,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-31
+
 ### Added
 
 - Add caller-defined target tags and execution profiles to both interfaces, with
@@ -129,7 +131,8 @@ Rust PR Bench originated in
 [`terjekv/github-action-iai-callgrind`](https://github.com/terjekv/github-action-iai-callgrind).
 That repository retains the historical changelog and existing `v1`–`v3` compatibility releases.
 
-[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/terjekv/rust-pr-bench/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/terjekv/rust-pr-bench/compare/v1.1.0...v1.1.1
